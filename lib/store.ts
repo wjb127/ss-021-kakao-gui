@@ -1,69 +1,80 @@
-// 로컬 JSON 파일 저장소
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import type { Analysis, CategoriesFile, Category, TodosFile } from "./types";
+// SQLite 기반 저장소 (better-sqlite3, 동기 API를 async로 래핑)
+import { getDb } from "./db";
+import type { Analysis, CategoriesFile, Category, Urgency } from "./types";
 
-const DATA_DIR = path.join(os.homedir(), ".kakaocli");
-const CATEGORIES_PATH = path.join(DATA_DIR, "categories.json");
-const TODOS_PATH = path.join(DATA_DIR, "todos.json");
-
-async function ensureDir() {
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-  } catch {
-    // ignore
-  }
+interface CategoryRow {
+  chat_id: string;
+  category: Category;
 }
 
-async function readJson<T>(p: string, fallback: T): Promise<T> {
-  try {
-    await ensureDir();
-    const raw = await fs.readFile(p, "utf-8");
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-async function writeJson(p: string, data: unknown): Promise<void> {
-  await ensureDir();
-  await fs.writeFile(p, JSON.stringify(data, null, 2), "utf-8");
+interface AnalysisRow {
+  chat_id: string;
+  summary: string;
+  urgency: string;
+  todos: string;
+  next_action: string;
+  analyzed_at: string;
 }
 
 export async function getCategories(): Promise<CategoriesFile> {
-  return readJson<CategoriesFile>(CATEGORIES_PATH, {});
+  const db = getDb();
+  const rows = db.prepare("SELECT chat_id, category FROM categories").all() as CategoryRow[];
+  return Object.fromEntries(rows.map((r) => [r.chat_id, r.category]));
 }
 
 export async function setCategory(
   chatId: string,
   category: Category | null,
 ): Promise<void> {
-  const data = await getCategories();
+  const db = getDb();
   if (category === null) {
-    delete data[chatId];
+    db.prepare("DELETE FROM categories WHERE chat_id = ?").run(chatId);
   } else {
-    data[chatId] = category;
+    db.prepare(
+      "INSERT OR REPLACE INTO categories (chat_id, category) VALUES (?, ?)",
+    ).run(chatId, category);
   }
-  await writeJson(CATEGORIES_PATH, data);
 }
 
-export async function getTodos(): Promise<TodosFile> {
-  return readJson<TodosFile>(TODOS_PATH, {});
-}
+export async function getTodoForChat(chatId: string): Promise<Analysis | null> {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT * FROM analyses WHERE chat_id = ?")
+    .get(chatId) as AnalysisRow | undefined;
+  if (!row) return null;
 
-export async function getTodoForChat(
-  chatId: string,
-): Promise<Analysis | null> {
-  const data = await getTodos();
-  return data[chatId] ?? null;
+  const urgency: Urgency =
+    row.urgency === "Critical" ||
+    row.urgency === "High" ||
+    row.urgency === "Medium" ||
+    row.urgency === "Low"
+      ? (row.urgency as Urgency)
+      : "Medium";
+
+  return {
+    summary: row.summary,
+    urgency,
+    todos: JSON.parse(row.todos) as string[],
+    nextAction: row.next_action,
+    analyzedAt: row.analyzed_at,
+  };
 }
 
 export async function setTodoForChat(
   chatId: string,
   analysis: Analysis,
 ): Promise<void> {
-  const data = await getTodos();
-  data[chatId] = analysis;
-  await writeJson(TODOS_PATH, data);
+  const db = getDb();
+  db.prepare(
+    `INSERT OR REPLACE INTO analyses
+     (chat_id, summary, urgency, todos, next_action, analyzed_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    chatId,
+    analysis.summary,
+    analysis.urgency,
+    JSON.stringify(analysis.todos),
+    analysis.nextAction,
+    analysis.analyzedAt,
+  );
 }

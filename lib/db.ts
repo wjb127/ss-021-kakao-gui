@@ -1,0 +1,36 @@
+// SQLite 연결 및 스키마 초기화
+import Database from "better-sqlite3";
+import path from "node:path";
+import os from "node:os";
+import { mkdirSync } from "node:fs";
+
+const DATA_DIR = path.join(os.homedir(), ".kakaocli");
+const DB_PATH = path.join(DATA_DIR, "kakao-gui.db");
+
+let _db: Database.Database | null = null;
+
+export function getDb(): Database.Database {
+  if (_db) return _db;
+
+  mkdirSync(DATA_DIR, { recursive: true });
+  _db = new Database(DB_PATH);
+  _db.pragma("journal_mode = WAL");
+
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS categories (
+      chat_id TEXT PRIMARY KEY,
+      category TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS analyses (
+      chat_id    TEXT PRIMARY KEY,
+      summary    TEXT NOT NULL,
+      urgency    TEXT NOT NULL,
+      todos      TEXT NOT NULL,
+      next_action TEXT NOT NULL,
+      analyzed_at TEXT NOT NULL
+    );
+  `);
+
+  return _db;
+}
