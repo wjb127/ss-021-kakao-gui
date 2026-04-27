@@ -76,7 +76,8 @@ export default function Home() {
   const selectedChat = chats.find((c) => c.id === selectedChatId) ?? null;
 
   return (
-    <div className="flex h-screen bg-gray-950 text-gray-100 overflow-hidden">
+    /* 페이지 루트: 60% 배경색 */
+    <div className="flex h-screen bg-[#D6D8DF] text-[#1A1F36] overflow-hidden">
       <div className="w-64 shrink-0 h-full">
         <ChatList
           chats={chats}

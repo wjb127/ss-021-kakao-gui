@@ -8,11 +8,12 @@ interface Props {
   chat: Chat | null;
 }
 
+// 긴급도 배지 — 라이트 테마에 맞춰 조정
 const URGENCY_STYLE: Record<Urgency, string> = {
-  Low: "bg-gray-600 text-gray-100",
-  Medium: "bg-yellow-600 text-white",
-  High: "bg-orange-600 text-white",
-  Critical: "bg-red-600 text-white",
+  Low:      "bg-[#E8E9EC] text-[#6B7280]",
+  Medium:   "bg-yellow-100 text-yellow-800 border border-yellow-300",
+  High:     "bg-orange-100 text-orange-800 border border-orange-300",
+  Critical: "bg-red-100 text-red-700 border border-red-300",
 };
 
 function formatTimestamp(iso: string): string {
@@ -80,7 +81,8 @@ export function AIPanel({ chat }: Props) {
 
   if (!chat) {
     return (
-      <div className="w-full h-full bg-gray-900 border-l border-gray-800 p-4 text-xs text-gray-500">
+      /* AI 패널: 흰 배경, 좌측 보더 #D6D8DF */
+      <div className="w-full h-full bg-white border-l border-[#D6D8DF] p-4 text-xs text-[#6B7280]">
         채팅을 선택하면 AI 분석이 표시됩니다
       </div>
     );
@@ -88,12 +90,12 @@ export function AIPanel({ chat }: Props) {
 
   if (chat.category !== "client") {
     return (
-      <div className="w-full h-full bg-gray-900 border-l border-gray-800 p-4">
-        <div className="text-xs text-gray-500">
-          AI 분석은 <span className="text-blue-400">고객</span> 카테고리 채팅에만
+      <div className="w-full h-full bg-white border-l border-[#D6D8DF] p-4">
+        <div className="text-xs text-[#6B7280]">
+          AI 분석은 <span className="text-[#2959AA] font-medium">고객</span> 카테고리 채팅에만
           제공됩니다
         </div>
-        <div className="text-[10px] text-gray-600 mt-2">
+        <div className="text-[10px] text-[#9CA3AF] mt-2">
           왼쪽 채팅 옆 배지를 클릭해서 카테고리를 [고객]으로 변경하세요
         </div>
       </div>
@@ -101,48 +103,54 @@ export function AIPanel({ chat }: Props) {
   }
 
   return (
-    <div className="w-full h-full bg-gray-900 border-l border-gray-800 flex flex-col">
-      <div className="p-3 border-b border-gray-800">
-        <h2 className="text-sm font-bold text-gray-200">AI 분석</h2>
-        <div className="text-[10px] text-gray-500 truncate">
+    <div className="w-full h-full bg-white border-l border-[#D6D8DF] flex flex-col">
+      {/* 패널 헤더 */}
+      <div className="p-3 border-b border-[#D6D8DF] bg-white">
+        <h2 className="text-sm font-bold text-[#1A1F36]">AI 분석</h2>
+        <div className="text-[10px] text-[#6B7280] truncate">
           {chat.display_name}
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {/* 분석 시작 버튼 */}
         {!analysis && !loading && (
           <button
             onClick={runAnalyze}
-            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors"
+            className="w-full py-2 bg-[#2959AA] hover:bg-[#1D3F7A] text-white text-sm rounded transition-colors"
           >
             AI 분석하기
           </button>
         )}
 
+        {/* 로딩 스피너 */}
         {loading && (
           <div className="text-center py-8">
-            <div className="inline-block w-6 h-6 border-2 border-gray-600 border-t-blue-500 rounded-full animate-spin" />
-            <div className="text-xs text-gray-500 mt-2">분석 중...</div>
+            <div className="inline-block w-6 h-6 border-2 border-[#D6D8DF] border-t-[#2959AA] rounded-full animate-spin" />
+            <div className="text-xs text-[#6B7280] mt-2">분석 중...</div>
           </div>
         )}
 
+        {/* 에러: 라이트 레드 */}
         {error && (
-          <div className="text-xs text-red-400 bg-red-950 border border-red-900 rounded p-2">
+          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">
             {error}
           </div>
         )}
 
         {analysis && !loading && (
           <>
+            {/* 요약 */}
             <div>
-              <div className="text-[10px] text-gray-500 mb-1">요약</div>
-              <div className="text-sm text-gray-100 bg-gray-800 rounded p-2">
+              <div className="text-[10px] text-[#6B7280] mb-1">요약</div>
+              <div className="text-sm text-[#1A1F36] bg-[#F5F6F8] border border-[#D6D8DF] rounded p-2">
                 {analysis.summary}
               </div>
             </div>
 
+            {/* 긴급도 */}
             <div>
-              <div className="text-[10px] text-gray-500 mb-1">긴급도</div>
+              <div className="text-[10px] text-[#6B7280] mb-1">긴급도</div>
               <span
                 className={`inline-block text-xs font-semibold px-2 py-1 rounded ${URGENCY_STYLE[analysis.urgency]}`}
               >
@@ -150,18 +158,20 @@ export function AIPanel({ chat }: Props) {
               </span>
             </div>
 
+            {/* 다음 액션 */}
             {analysis.nextAction && (
               <div>
-                <div className="text-[10px] text-gray-500 mb-1">다음 액션</div>
-                <div className="text-sm text-yellow-200 bg-yellow-950 border border-yellow-800 rounded p-2 font-medium">
+                <div className="text-[10px] text-[#6B7280] mb-1">다음 액션</div>
+                <div className="text-sm text-yellow-800 bg-yellow-50 border border-yellow-200 rounded p-2 font-medium">
                   {analysis.nextAction}
                 </div>
               </div>
             )}
 
+            {/* TODO 체크리스트 */}
             {analysis.todos.length > 0 && (
               <div>
-                <div className="text-[10px] text-gray-500 mb-1">
+                <div className="text-[10px] text-[#6B7280] mb-1">
                   TODO ({analysis.todos.length})
                 </div>
                 <ul className="space-y-1">
@@ -170,7 +180,7 @@ export function AIPanel({ chat }: Props) {
                     return (
                       <li
                         key={i}
-                        className="flex items-start gap-2 text-xs text-gray-200 bg-gray-800 rounded p-2"
+                        className="flex items-start gap-2 text-xs text-[#1A1F36] bg-[#F5F6F8] border border-[#D6D8DF] rounded p-2"
                       >
                         <input
                           type="checkbox"
@@ -181,11 +191,11 @@ export function AIPanel({ chat }: Props) {
                             else next.add(i);
                             setCheckedSet(next);
                           }}
-                          className="mt-0.5 shrink-0"
+                          className="mt-0.5 shrink-0 accent-[#2959AA]"
                         />
                         <span
                           className={
-                            checked ? "line-through text-gray-500" : ""
+                            checked ? "line-through text-[#9CA3AF]" : ""
                           }
                         >
                           {t}
@@ -197,13 +207,14 @@ export function AIPanel({ chat }: Props) {
               </div>
             )}
 
-            <div className="pt-2 border-t border-gray-800 flex items-center justify-between">
-              <span className="text-[10px] text-gray-500">
+            {/* 하단: 분석 시각 + 재분석 버튼 */}
+            <div className="pt-2 border-t border-[#D6D8DF] flex items-center justify-between">
+              <span className="text-[10px] text-[#9CA3AF]">
                 {formatTimestamp(analysis.analyzedAt)}
               </span>
               <button
                 onClick={runAnalyze}
-                className="text-[10px] px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded"
+                className="text-[10px] px-2 py-1 bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36] rounded transition-colors"
               >
                 재분석
               </button>

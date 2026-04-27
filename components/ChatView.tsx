@@ -106,58 +106,62 @@ export function ChatView({ chat, messages, loading, onRefresh }: Props) {
 
   if (!chat) {
     return (
-      <div className="flex h-full items-center justify-center bg-gray-950 text-gray-500 text-sm">
+      <div className="flex h-full items-center justify-center bg-[#F5F6F8] text-[#6B7280] text-sm">
         왼쪽에서 채팅을 선택하세요
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full bg-gray-950">
-      {/* 헤더 */}
-      <div className="px-4 py-3 border-b border-gray-800 bg-gray-900 flex items-start justify-between gap-2">
+    /* 메시지 영역 전체: 30% 서피스 #F5F6F8 */
+    <div className="flex flex-col h-full bg-[#F5F6F8]">
+      {/* 헤더: 흰 배경, 하단 보더 */}
+      <div className="px-4 py-3 border-b border-[#D6D8DF] bg-white flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-100 truncate">
+          <div className="text-sm font-semibold text-[#1A1F36] truncate">
             {(!chat.display_name || chat.display_name === "(unknown)")
             ? `(멤버 ${chat.member_count}명)`
             : chat.display_name}
           </div>
-          <div className="text-[11px] text-gray-500">
+          <div className="text-[11px] text-[#6B7280]">
             멤버 {chat.member_count}명 · 메시지 {sorted.length}개 ({chat.member_count <= 10 ? "50일" : "10일"})
           </div>
         </div>
         <div className="flex gap-1.5 shrink-0">
+          {/* 새로고침 버튼 */}
           <button
             onClick={onRefresh}
             disabled={loading}
-            className="text-gray-400 hover:text-gray-200 disabled:text-gray-600 transition-colors"
+            className="text-[#6B7280] hover:text-[#1A1F36] disabled:text-[#9CA3AF] transition-colors"
             title="메시지 새로고침"
           >
             <svg
-              className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
+              className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#2959AA]" : ""}`}
               fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
             >
               <path strokeLinecap="round" strokeLinejoin="round"
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
           </button>
+          {/* 텍스트 뷰 토글 */}
           <button
             onClick={() => setRawMode((v) => !v)}
             className={`text-[11px] px-2 py-1 rounded transition-colors ${
               rawMode
-                ? "bg-yellow-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                ? "bg-yellow-400 text-yellow-900"
+                : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
             }`}
             title="텍스트 뷰 (드래그 선택용)"
           >
             텍스트
           </button>
+          {/* 전체 복사 버튼 */}
           <button
             onClick={handleCopy}
             className={`text-[11px] px-2 py-1 rounded transition-colors ${
               copied
-                ? "bg-green-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                ? "bg-green-500 text-white"
+                : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
             }`}
             title="전체 메시지 클립보드 복사"
           >
@@ -166,19 +170,20 @@ export function ChatView({ chat, messages, loading, onRefresh }: Props) {
         </div>
       </div>
 
-      {/* 메시지 영역 */}
+      {/* 메시지 스크롤 영역 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="text-center text-gray-500 text-xs py-8">
-            메시지 로딩 중...
+          <div className="text-center text-[#6B7280] text-xs py-8">
+            <div className="inline-block w-5 h-5 border-2 border-[#D6D8DF] border-t-[#2959AA] rounded-full animate-spin mb-2" />
+            <div>메시지 로딩 중...</div>
           </div>
         ) : sorted.length === 0 ? (
-          <div className="text-center text-gray-500 text-xs py-8">
+          <div className="text-center text-[#6B7280] text-xs py-8">
             메시지가 없습니다
           </div>
         ) : rawMode ? (
           /* 텍스트 뷰: 드래그 선택 쉬운 평문 */
-          <pre className="p-4 text-xs text-gray-300 font-mono whitespace-pre-wrap break-words leading-5 select-all">
+          <pre className="p-4 text-xs text-[#1A1F36] font-mono whitespace-pre-wrap break-words leading-5 select-all">
             {toPlainText(messages)}
           </pre>
         ) : (
@@ -198,16 +203,18 @@ export function ChatView({ chat, messages, loading, onRefresh }: Props) {
 
               return (
                 <div key={m.id}>
+                  {/* 날짜 구분선 */}
                   {showDate && (
                     <div className="text-center my-3">
-                      <span className="text-[10px] text-gray-500 bg-gray-800 px-2 py-0.5 rounded">
+                      <span className="text-[10px] text-[#6B7280] bg-[#E8E9EC] px-2 py-0.5 rounded">
                         {formatDateLabel(m.timestamp)}
                       </span>
                     </div>
                   )}
+                  {/* 시스템 메시지 */}
                   {isSystem ? (
                     <div className="text-center my-1">
-                      <span className="text-[10px] text-gray-600">
+                      <span className="text-[10px] text-[#9CA3AF]">
                         {m.text || `[${m.type}]`}
                       </span>
                     </div>
@@ -218,16 +225,18 @@ export function ChatView({ chat, messages, loading, onRefresh }: Props) {
                       }`}
                     >
                       <div className="max-w-[70%]">
+                        {/* 발신자 표시 */}
                         {showSender && (
-                          <div className="text-[10px] text-gray-500 mb-0.5 ml-1">
+                          <div className="text-[10px] text-[#6B7280] mb-0.5 ml-1">
                             {m.sender_id.slice(-6)}
                           </div>
                         )}
+                        {/* 말풍선: 내 메시지=#2959AA, 상대=흰색 */}
                         <div
                           className={`px-3 py-1.5 rounded-lg text-sm ${
                             m.is_from_me
-                              ? "bg-blue-600 text-white rounded-br-sm"
-                              : "bg-gray-800 text-gray-100 rounded-bl-sm"
+                              ? "bg-[#2959AA] text-white rounded-br-sm"
+                              : "bg-white text-[#1A1F36] border border-gray-200 rounded-bl-sm"
                           }`}
                         >
                           <div className="whitespace-pre-wrap break-words">
@@ -241,8 +250,8 @@ export function ChatView({ chat, messages, loading, onRefresh }: Props) {
                                   }}
                                   className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
                                     m.is_from_me
-                                      ? "bg-blue-500 hover:bg-blue-400 text-blue-100"
-                                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                                      ? "bg-[#1D3F7A] hover:bg-[#163266] text-blue-100"
+                                      : "bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36]"
                                   }`}
                                   title={toPhotoFilename(m.timestamp)}
                                 >
@@ -251,9 +260,10 @@ export function ChatView({ chat, messages, loading, onRefresh }: Props) {
                               </span>
                             ) : (m.text || `[${m.type}]`)}
                           </div>
+                          {/* 타임스탬프 */}
                           <div
                             className={`text-[9px] mt-0.5 ${
-                              m.is_from_me ? "text-blue-200" : "text-gray-500"
+                              m.is_from_me ? "text-blue-200" : "text-[#9CA3AF]"
                             }`}
                           >
                             {formatTime(m.timestamp)}

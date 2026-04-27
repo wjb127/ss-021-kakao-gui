@@ -15,10 +15,11 @@ interface Props {
   refreshing: boolean;
 }
 
+// 카테고리 배지 스타일 — 10% 포인트 컬러 기반
 const CATEGORY_STYLES: Record<Category, string> = {
-  bot: "bg-gray-600 text-gray-100",
-  client: "bg-blue-600 text-white",
-  casual: "bg-green-600 text-white",
+  bot:    "bg-[#6B7280] text-white",
+  client: "bg-[#2959AA] text-white",
+  casual: "bg-[#16A34A] text-white",
 };
 
 const CATEGORY_LABELS: Record<Category, string> = {
@@ -28,10 +29,10 @@ const CATEGORY_LABELS: Record<Category, string> = {
 };
 
 const OPTIONS: { value: Category | null; label: string; style: string }[] = [
-  { value: null,     label: "— 없음", style: "text-gray-400 hover:bg-gray-700" },
-  { value: "client", label: "고객",   style: "text-blue-400 hover:bg-gray-700" },
-  { value: "casual", label: "잡담",   style: "text-green-400 hover:bg-gray-700" },
-  { value: "bot",    label: "봇",     style: "text-gray-400 hover:bg-gray-700" },
+  { value: null,     label: "— 없음", style: "text-[#6B7280] hover:bg-[#E8E9EC]" },
+  { value: "client", label: "고객",   style: "text-[#2959AA] hover:bg-[#E8E9EC]" },
+  { value: "casual", label: "잡담",   style: "text-[#16A34A] hover:bg-[#E8E9EC]" },
+  { value: "bot",    label: "봇",     style: "text-[#6B7280] hover:bg-[#E8E9EC]" },
 ];
 
 function CategoryDropdown({
@@ -62,14 +63,15 @@ function CategoryDropdown({
         className={`text-[10px] px-1.5 py-0.5 rounded font-medium transition-colors ${
           category
             ? CATEGORY_STYLES[category]
-            : "bg-gray-800 text-gray-500 border border-gray-700 hover:border-gray-500"
+            : "bg-[#E8E9EC] text-[#6B7280] border border-[#D6D8DF] hover:border-[#9CA3AF]"
         }`}
       >
         {category ? CATEGORY_LABELS[category] : "—"}
       </button>
 
+      {/* 드롭다운 메뉴 — 흰 배경, 라이트 보더 */}
       {open && (
-        <div className="absolute left-0 top-full mt-0.5 z-50 bg-gray-800 border border-gray-700 rounded shadow-lg py-0.5 min-w-[64px]">
+        <div className="absolute left-0 top-full mt-0.5 z-50 bg-white border border-[#D6D8DF] rounded shadow-md py-0.5 min-w-[64px]">
           {OPTIONS.map((opt) => (
             <button
               key={String(opt.value)}
@@ -133,18 +135,20 @@ export function ChatList({
   }, [chats, filter]);
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 border-r border-gray-800">
-      <div className="p-3 border-b border-gray-800">
+    /* 사이드바: 60% 배경 #D6D8DF */
+    <div className="flex flex-col h-full bg-[#D6D8DF] border-r border-[#D6D8DF]">
+      {/* 헤더 영역: 30% 흰 패널 */}
+      <div className="p-3 border-b border-[#D6D8DF] bg-white">
         <div className="flex items-center justify-between mb-2">
-          <h1 className="text-sm font-bold text-gray-200">카카오톡 인박스</h1>
+          <h1 className="text-sm font-bold text-[#1A1F36]">카카오톡 인박스</h1>
           <button
             onClick={onRefresh}
             disabled={refreshing}
-            className="text-gray-400 hover:text-gray-200 disabled:text-gray-600 transition-colors"
+            className="text-[#6B7280] hover:text-[#1A1F36] disabled:text-[#9CA3AF] transition-colors"
             title="채팅 목록 새로고침"
           >
             <svg
-              className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+              className={`w-4 h-4 ${refreshing ? "animate-spin text-[#2959AA]" : ""}`}
               fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
             >
               <path strokeLinecap="round" strokeLinejoin="round"
@@ -152,15 +156,16 @@ export function ChatList({
             </svg>
           </button>
         </div>
+        {/* 필터 탭 */}
         <div className="flex gap-1 text-xs">
           {(["all", "client", "casual"] as const).map((f) => (
             <button
               key={f}
               onClick={() => onFilterChange(f)}
-              className={`flex-1 py-1 rounded ${
+              className={`flex-1 py-1 rounded transition-colors ${
                 filter === f
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                  ? "bg-[#2959AA] text-white"
+                  : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
               }`}
             >
               {f === "all" ? "전체" : f === "client" ? "고객" : "잡담"}
@@ -168,42 +173,49 @@ export function ChatList({
           ))}
         </div>
       </div>
+
+      {/* 채팅 목록 */}
       <div className="flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
-          <div className="text-xs text-gray-500 p-4 text-center">
+          <div className="text-xs text-[#6B7280] p-4 text-center">
             채팅이 없습니다
           </div>
         ) : (
-          filtered.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => onSelect(c.id)}
-              className={`w-full text-left px-3 py-2 border-b border-gray-800 hover:bg-gray-800 transition-colors ${
-                selectedChatId === c.id ? "bg-gray-800" : ""
-              }`}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <CategoryDropdown
-                  category={c.category}
-                  onSelect={(cat) => onCategoryChange(c.id, cat)}
-                />
-                <span className="text-sm text-gray-100 truncate flex-1">
-                  {(!c.display_name || c.display_name === "(unknown)")
-                    ? `(멤버 ${c.member_count}명)`
-                    : c.display_name}
-                </span>
-                {c.unread_count > 0 && (
-                  <span className="text-[10px] bg-red-600 text-white rounded-full px-1.5 py-0.5 shrink-0">
-                    {c.unread_count > 999 ? "999+" : c.unread_count}
+          filtered.map((c) => {
+            const isSelected = selectedChatId === c.id;
+            return (
+              <button
+                key={c.id}
+                onClick={() => onSelect(c.id)}
+                className={`w-full text-left px-3 py-2 border-b border-[#C8CAD1] transition-colors ${
+                  isSelected
+                    ? "bg-[#E8ECF5] border-l-2 border-l-[#2959AA]"
+                    : "hover:bg-[#E0E2E8]"
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <CategoryDropdown
+                    category={c.category}
+                    onSelect={(cat) => onCategoryChange(c.id, cat)}
+                  />
+                  <span className="text-sm text-[#1A1F36] truncate flex-1">
+                    {(!c.display_name || c.display_name === "(unknown)")
+                      ? `(멤버 ${c.member_count}명)`
+                      : c.display_name}
                   </span>
-                )}
-              </div>
-              <div className="flex items-center justify-between text-[10px] text-gray-500">
-                <span>👥 {c.member_count}</span>
-                <span>{formatTime(c.last_message_at)}</span>
-              </div>
-            </button>
-          ))
+                  {c.unread_count > 0 && (
+                    <span className="text-[10px] bg-red-500 text-white rounded-full px-1.5 py-0.5 shrink-0">
+                      {c.unread_count > 999 ? "999+" : c.unread_count}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-[#6B7280]">
+                  <span>👥 {c.member_count}</span>
+                  <span>{formatTime(c.last_message_at)}</span>
+                </div>
+              </button>
+            );
+          })
         )}
       </div>
     </div>
