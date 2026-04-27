@@ -13,6 +13,8 @@ export async function GET(req: NextRequest) {
       { status: 400 },
     );
   }
-  const messages = await listMessages(chatId, "10d", 1000);
+  const memberCount = parseInt(req.nextUrl.searchParams.get("memberCount") || "0", 10);
+  const since = memberCount > 0 && memberCount <= 10 ? "50d" : "10d";
+  const messages = await listMessages(chatId, since, 2000);
   return NextResponse.json(messages);
 }

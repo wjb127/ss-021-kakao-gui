@@ -21,16 +21,18 @@ export default function Home() {
       .catch(console.error);
   }, []);
 
-  // 메시지 로드
+  // 메시지 로드 (10명 이하 방은 50일, 그 외 10일)
   useEffect(() => {
     if (!selectedChatId) return;
+    const chat = chats.find((c) => c.id === selectedChatId);
+    const memberCount = chat?.member_count ?? 0;
     setMessagesLoading(true);
-    fetch(`/api/messages?chatId=${selectedChatId}`)
+    fetch(`/api/messages?chatId=${selectedChatId}&memberCount=${memberCount}`)
       .then((r) => r.json())
       .then((data) => setMessages(Array.isArray(data) ? data : []))
       .catch(() => setMessages([]))
       .finally(() => setMessagesLoading(false));
-  }, [selectedChatId]);
+  }, [selectedChatId, chats]);
 
   const handleSelect = useCallback((id: string) => {
     setSelectedChatId(id);

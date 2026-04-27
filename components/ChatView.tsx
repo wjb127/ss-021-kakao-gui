@@ -112,7 +112,7 @@ export function ChatView({ chat, messages, loading }: Props) {
             : chat.display_name}
           </div>
           <div className="text-[11px] text-gray-500">
-            멤버 {chat.member_count}명 · 메시지 {sorted.length}개 (10일)
+            멤버 {chat.member_count}명 · 메시지 {sorted.length}개 ({chat.member_count <= 10 ? "50일" : "10일"})
           </div>
         </div>
         <div className="flex gap-1.5 shrink-0">
