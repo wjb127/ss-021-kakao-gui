@@ -188,8 +188,7 @@ export function ChatView({ chat, messages, loading, onRefresh }: Props) {
               const prev = i > 0 ? sorted[i - 1] : null;
               const showDate =
                 !prev || dateKey(prev.timestamp) !== dateKey(m.timestamp);
-              const isSystem =
-                m.type !== "text" && m.type !== "image" && m.type !== "photo";
+              const isSystem = m.type === "system";
               const showSender =
                 !m.is_from_me &&
                 !isSystem &&
