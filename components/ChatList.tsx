@@ -135,7 +135,9 @@ export function ChatList({
                   }}
                 />
                 <span className="text-sm text-gray-100 truncate flex-1">
-                  {c.display_name || "(이름 없음)"}
+                  {(!c.display_name || c.display_name === "(unknown)")
+                    ? `(멤버 ${c.member_count}명)`
+                    : c.display_name}
                 </span>
                 {c.unread_count > 0 && (
                   <span className="text-[10px] bg-red-600 text-white rounded-full px-1.5 py-0.5 shrink-0">

@@ -107,7 +107,9 @@ export function ChatView({ chat, messages, loading }: Props) {
       <div className="px-4 py-3 border-b border-gray-800 bg-gray-900 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-gray-100 truncate">
-            {chat.display_name}
+            {(!chat.display_name || chat.display_name === "(unknown)")
+            ? `(멤버 ${chat.member_count}명)`
+            : chat.display_name}
           </div>
           <div className="text-[11px] text-gray-500">
             멤버 {chat.member_count}명 · 메시지 {sorted.length}개 (10일)
