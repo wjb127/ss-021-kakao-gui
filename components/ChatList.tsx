@@ -11,6 +11,8 @@ interface Props {
   filter: "all" | "client" | "casual";
   onFilterChange: (f: "all" | "client" | "casual") => void;
   onCategoryChange: (chatId: string, category: Category | null) => void;
+  onRefresh: () => void;
+  refreshing: boolean;
 }
 
 const CATEGORY_STYLES: Record<Category, string> = {
@@ -117,6 +119,8 @@ export function ChatList({
   filter,
   onFilterChange,
   onCategoryChange,
+  onRefresh,
+  refreshing,
 }: Props) {
   const filtered = useMemo(() => {
     const list =
@@ -131,7 +135,23 @@ export function ChatList({
   return (
     <div className="flex flex-col h-full bg-gray-900 border-r border-gray-800">
       <div className="p-3 border-b border-gray-800">
-        <h1 className="text-sm font-bold text-gray-200 mb-2">카카오톡 인박스</h1>
+        <div className="flex items-center justify-between mb-2">
+          <h1 className="text-sm font-bold text-gray-200">카카오톡 인박스</h1>
+          <button
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="text-gray-400 hover:text-gray-200 disabled:text-gray-600 transition-colors"
+            title="채팅 목록 새로고침"
+          >
+            <svg
+              className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
         <div className="flex gap-1 text-xs">
           {(["all", "client", "casual"] as const).map((f) => (
             <button

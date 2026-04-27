@@ -12,14 +12,19 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [filter, setFilter] = useState<"all" | "client" | "casual">("all");
+  const [chatsLoading, setChatsLoading] = useState(false);
 
-  // 채팅 목록 로드
-  useEffect(() => {
+  const loadChats = useCallback(() => {
+    setChatsLoading(true);
     fetch("/api/chats")
       .then((r) => r.json())
       .then(setChats)
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setChatsLoading(false));
   }, []);
+
+  // 채팅 목록 최초 로드
+  useEffect(() => { loadChats(); }, [loadChats]);
 
   // 메시지 로드 (10명 이하 방은 50일, 그 외 10일)
   useEffect(() => {
@@ -70,6 +75,8 @@ export default function Home() {
           filter={filter}
           onFilterChange={setFilter}
           onCategoryChange={handleCategoryChange}
+          onRefresh={loadChats}
+          refreshing={chatsLoading}
         />
       </div>
       <div className="flex-1 h-full min-w-0">
