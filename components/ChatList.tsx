@@ -1,7 +1,7 @@
 "use client";
 
 // 채팅 목록 사이드바
-import { useMemo } from "react";
+import { useMemo, useEffect, useRef, useState } from "react";
 import type { Category, Chat } from "@/lib/types";
 
 interface Props {
@@ -13,43 +13,79 @@ interface Props {
   onCategoryChange: (chatId: string, category: Category | null) => void;
 }
 
-// 카테고리 사이클: none -> bot -> casual -> client -> none
-const CYCLE: (Category | null)[] = [null, "bot", "casual", "client"];
+const CATEGORY_STYLES: Record<Category, string> = {
+  bot: "bg-gray-600 text-gray-100",
+  client: "bg-blue-600 text-white",
+  casual: "bg-green-600 text-white",
+};
 
-function nextCategory(current: Category | null): Category | null {
-  const idx = CYCLE.indexOf(current);
-  return CYCLE[(idx + 1) % CYCLE.length];
-}
+const CATEGORY_LABELS: Record<Category, string> = {
+  bot: "봇",
+  client: "고객",
+  casual: "잡담",
+};
 
-function CategoryBadge({
+const OPTIONS: { value: Category | null; label: string; style: string }[] = [
+  { value: null,     label: "— 없음", style: "text-gray-400 hover:bg-gray-700" },
+  { value: "client", label: "고객",   style: "text-blue-400 hover:bg-gray-700" },
+  { value: "casual", label: "잡담",   style: "text-green-400 hover:bg-gray-700" },
+  { value: "bot",    label: "봇",     style: "text-gray-400 hover:bg-gray-700" },
+];
+
+function CategoryDropdown({
   category,
-  onClick,
+  onSelect,
 }: {
   category: Category | null;
-  onClick: (e: React.MouseEvent) => void;
+  onSelect: (c: Category | null) => void;
 }) {
-  const styles: Record<Category, string> = {
-    bot: "bg-gray-600 text-gray-100",
-    client: "bg-blue-600 text-white",
-    casual: "bg-green-600 text-white",
-  };
-  const labels: Record<Category, string> = {
-    bot: "봇",
-    client: "고객",
-    casual: "잡담",
-  };
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
   return (
-    <button
-      onClick={onClick}
-      className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 transition-colors ${
-        category
-          ? styles[category]
-          : "bg-gray-800 text-gray-500 border border-gray-700 hover:border-gray-500"
-      }`}
-      title="클릭해서 카테고리 변경"
-    >
-      {category ? labels[category] : "—"}
-    </button>
+    <div ref={ref} className="relative shrink-0">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        className={`text-[10px] px-1.5 py-0.5 rounded font-medium transition-colors ${
+          category
+            ? CATEGORY_STYLES[category]
+            : "bg-gray-800 text-gray-500 border border-gray-700 hover:border-gray-500"
+        }`}
+      >
+        {category ? CATEGORY_LABELS[category] : "—"}
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-0.5 z-50 bg-gray-800 border border-gray-700 rounded shadow-lg py-0.5 min-w-[64px]">
+          {OPTIONS.map((opt) => (
+            <button
+              key={String(opt.value)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect(opt.value);
+                setOpen(false);
+              }}
+              className={`w-full text-left text-[11px] px-3 py-1.5 ${opt.style} ${
+                category === opt.value ? "font-bold" : ""
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -127,12 +163,9 @@ export function ChatList({
               }`}
             >
               <div className="flex items-center gap-2 mb-1">
-                <CategoryBadge
+                <CategoryDropdown
                   category={c.category}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCategoryChange(c.id, nextCategory(c.category));
-                  }}
+                  onSelect={(cat) => onCategoryChange(c.id, cat)}
                 />
                 <span className="text-sm text-gray-100 truncate flex-1">
                   {(!c.display_name || c.display_name === "(unknown)")
