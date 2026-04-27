@@ -46,6 +46,19 @@ export function getDb(): Database.Database {
 
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp
       ON messages(chat_id, timestamp);
+
+    CREATE TABLE IF NOT EXISTS memos (
+      chat_id TEXT PRIMARY KEY,
+      content TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS project_paths (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id      TEXT NOT NULL,
+      project_path TEXT NOT NULL,
+      UNIQUE(chat_id, project_path)
+    );
   `);
 
   return _db;

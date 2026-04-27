@@ -93,6 +93,54 @@ export async function setTodoForChat(
   );
 }
 
+// ─── memos ───────────────────────────────────────────────────────────────────
+
+export function getMemo(chatId: string): string {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT content FROM memos WHERE chat_id = ?")
+    .get(chatId) as { content: string } | undefined;
+  return row?.content ?? "";
+}
+
+export function setMemo(chatId: string, content: string): void {
+  const db = getDb();
+  db.prepare(
+    `INSERT OR REPLACE INTO memos (chat_id, content, updated_at)
+     VALUES (?, ?, ?)`,
+  ).run(chatId, content, new Date().toISOString());
+}
+
+// ─── project_paths ───────────────────────────────────────────────────────────
+
+export function getProjectPaths(chatId: string): string[] {
+  const db = getDb();
+  const rows = db
+    .prepare("SELECT project_path FROM project_paths WHERE chat_id = ? ORDER BY id ASC")
+    .all(chatId) as { project_path: string }[];
+  return rows.map((r) => r.project_path);
+}
+
+export function addProjectPath(chatId: string, projectPath: string): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT OR IGNORE INTO project_paths (chat_id, project_path) VALUES (?, ?)",
+  ).run(chatId, projectPath.trim());
+}
+
+export function removeProjectPath(chatId: string, projectPath: string): void {
+  const db = getDb();
+  db.prepare(
+    "DELETE FROM project_paths WHERE chat_id = ? AND project_path = ?",
+  ).run(chatId, projectPath);
+}
+
+// 하위 호환 — 단일 경로 조회 (save-context에서 사용)
+export function getProjectPath(chatId: string): string | null {
+  const paths = getProjectPaths(chatId);
+  return paths[0] ?? null;
+}
+
 // ─── messages (캐시) ─────────────────────────────────────────────────────────
 
 function rowToMessage(row: MessageRow): Message {

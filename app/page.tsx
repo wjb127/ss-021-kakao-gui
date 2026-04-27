@@ -74,11 +74,12 @@ export default function Home() {
   );
 
   const selectedChat = chats.find((c) => c.id === selectedChatId) ?? null;
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   return (
     /* 페이지 루트: 60% 배경색 */
     <div className="flex h-screen bg-[#D6D8DF] text-[#1A1F36] overflow-hidden">
-      <div className="w-64 shrink-0 h-full">
+      <div className={`${sidebarCollapsed ? "w-10" : "w-64"} shrink-0 h-full transition-all duration-200`}>
         <ChatList
           chats={chats}
           selectedChatId={selectedChatId}
@@ -88,6 +89,8 @@ export default function Home() {
           onCategoryChange={handleCategoryChange}
           onRefresh={loadChats}
           refreshing={chatsLoading}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
         />
       </div>
       <div className="flex-1 h-full min-w-0">

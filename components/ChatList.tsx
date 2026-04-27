@@ -13,6 +13,8 @@ interface Props {
   onCategoryChange: (chatId: string, category: Category | null) => void;
   onRefresh: () => void;
   refreshing: boolean;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 // 카테고리 배지 스타일 — 10% 포인트 컬러 기반
@@ -114,6 +116,13 @@ function formatTime(iso: string): string {
   }
 }
 
+// 카테고리 → 원형 색상 (접힌 상태용)
+const CATEGORY_DOT: Record<Category, string> = {
+  client: "bg-[#2959AA]",
+  casual: "bg-[#16A34A]",
+  bot:    "bg-[#6B7280]",
+};
+
 export function ChatList({
   chats,
   selectedChatId,
@@ -123,6 +132,8 @@ export function ChatList({
   onCategoryChange,
   onRefresh,
   refreshing,
+  collapsed,
+  onToggleCollapse,
 }: Props) {
   const filtered = useMemo(() => {
     const list =
@@ -134,6 +145,50 @@ export function ChatList({
     );
   }, [chats, filter]);
 
+  // ── 접힌 상태 ──────────────────────────────────────────
+  if (collapsed) {
+    return (
+      <div className="flex flex-col h-full bg-[#D6D8DF] border-r border-[#D6D8DF] items-center">
+        {/* 펼치기 버튼 */}
+        <button
+          onClick={onToggleCollapse}
+          className="w-full py-3 flex justify-center text-[#6B7280] hover:text-[#1A1F36] hover:bg-[#C8CAD1] transition-colors"
+          title="목록 펼치기"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+        <div className="flex-1 overflow-y-auto w-full">
+          {filtered.map((c) => {
+            const isSelected = selectedChatId === c.id;
+            return (
+              <button
+                key={c.id}
+                onClick={() => onSelect(c.id)}
+                title={c.display_name || `멤버 ${c.member_count}명`}
+                className={`w-full py-2 flex justify-center relative transition-colors ${
+                  isSelected ? "bg-[#E8ECF5]" : "hover:bg-[#C8CAD1]"
+                }`}
+              >
+                {/* 카테고리 점 */}
+                <span className={`w-2.5 h-2.5 rounded-full ${
+                  c.category ? CATEGORY_DOT[c.category] : "bg-[#9CA3AF]"
+                }`} />
+                {/* 미읽음 */}
+                {c.unread_count > 0 && (
+                  <span className="absolute top-1 right-1 text-[8px] bg-red-500 text-white rounded-full w-3.5 h-3.5 flex items-center justify-center">
+                    {c.unread_count > 9 ? "9+" : c.unread_count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   return (
     /* 사이드바: 60% 배경 #D6D8DF */
     <div className="flex flex-col h-full bg-[#D6D8DF] border-r border-[#D6D8DF]">
@@ -141,20 +196,32 @@ export function ChatList({
       <div className="p-3 border-b border-[#D6D8DF] bg-white">
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-sm font-bold text-[#1A1F36]">카카오톡 인박스</h1>
-          <button
-            onClick={onRefresh}
-            disabled={refreshing}
-            className="text-[#6B7280] hover:text-[#1A1F36] disabled:text-[#9CA3AF] transition-colors"
-            title="채팅 목록 새로고침"
-          >
-            <svg
-              className={`w-4 h-4 ${refreshing ? "animate-spin text-[#2959AA]" : ""}`}
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          <div className="flex items-center gap-1.5">
+            {/* 접기 버튼 */}
+            <button
+              onClick={onToggleCollapse}
+              className="text-[#6B7280] hover:text-[#1A1F36] transition-colors"
+              title="목록 접기"
             >
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </button>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <button
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="text-[#6B7280] hover:text-[#1A1F36] disabled:text-[#9CA3AF] transition-colors"
+              title="채팅 목록 새로고침"
+            >
+              <svg
+                className={`w-4 h-4 ${refreshing ? "animate-spin text-[#2959AA]" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </div>
         </div>
         {/* 필터 탭 */}
         <div className="flex gap-1 text-xs">
