@@ -55,6 +55,16 @@ function formatTimestamp(iso: string): string {
   }
 }
 
+function toPhotoFilename(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `photo_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.jpg`;
+  } catch {
+    return "photo.jpg";
+  }
+}
+
 function toPlainText(messages: Message[]): string {
   const sorted = [...messages].sort((a, b) =>
     a.timestamp.localeCompare(b.timestamp),
@@ -222,7 +232,25 @@ export function ChatView({ chat, messages, loading, onRefresh }: Props) {
                           }`}
                         >
                           <div className="whitespace-pre-wrap break-words">
-                            {m.text || `[${m.type}]`}
+                            {m.type === "photo" ? (
+                              <span className="flex items-center gap-2">
+                                <span>📷 사진</span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigator.clipboard.writeText(toPhotoFilename(m.timestamp));
+                                  }}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+                                    m.is_from_me
+                                      ? "bg-blue-500 hover:bg-blue-400 text-blue-100"
+                                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                                  }`}
+                                  title={toPhotoFilename(m.timestamp)}
+                                >
+                                  파일명 복사
+                                </button>
+                              </span>
+                            ) : (m.text || `[${m.type}]`)}
                           </div>
                           <div
                             className={`text-[9px] mt-0.5 ${
