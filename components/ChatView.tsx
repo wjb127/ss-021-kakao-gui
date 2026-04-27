@@ -1,7 +1,7 @@
 "use client";
 
 // 메시지 뷰 - 가운데 패널
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Chat, Message } from "@/lib/types";
 
 interface Props {
@@ -41,41 +41,106 @@ function formatTime(iso: string): string {
   }
 }
 
+function formatTimestamp(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    return `${mm}-${dd} ${hh}:${min}`;
+  } catch {
+    return "";
+  }
+}
+
+function toPlainText(messages: Message[]): string {
+  const sorted = [...messages].sort((a, b) =>
+    a.timestamp.localeCompare(b.timestamp),
+  );
+  return sorted
+    .filter((m) => m.text?.trim())
+    .map((m) => {
+      const who = m.is_from_me ? "나" : `상대(${m.sender_id.slice(-4)})`;
+      return `[${formatTimestamp(m.timestamp)}] ${who}: ${m.text}`;
+    })
+    .join("\n");
+}
+
 export function ChatView({ chat, messages, loading }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [rawMode, setRawMode] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  // 시간 오름차순 정렬
   const sorted = [...messages].sort((a, b) =>
     a.timestamp.localeCompare(b.timestamp),
   );
 
   useEffect(() => {
-    // 로드 후 맨 아래로 스크롤
     const el = scrollRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
+    if (el) el.scrollTop = el.scrollHeight;
   }, [chat?.id, messages.length]);
+
+  // 채팅방 바뀌면 rawMode 초기화
+  useEffect(() => {
+    setRawMode(false);
+  }, [chat?.id]);
+
+  async function handleCopy() {
+    const text = toPlainText(messages);
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
 
   if (!chat) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-gray-950 text-gray-500 text-sm">
+      <div className="flex h-full items-center justify-center bg-gray-950 text-gray-500 text-sm">
         왼쪽에서 채팅을 선택하세요
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-gray-950">
-      <div className="px-4 py-3 border-b border-gray-800 bg-gray-900">
-        <div className="text-sm font-semibold text-gray-100">
-          {chat.display_name}
+    <div className="flex flex-col h-full bg-gray-950">
+      {/* 헤더 */}
+      <div className="px-4 py-3 border-b border-gray-800 bg-gray-900 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-gray-100 truncate">
+            {chat.display_name}
+          </div>
+          <div className="text-[11px] text-gray-500">
+            멤버 {chat.member_count}명 · 메시지 {sorted.length}개 (10일)
+          </div>
         </div>
-        <div className="text-[11px] text-gray-500">
-          멤버 {chat.member_count}명 · 메시지 {sorted.length}개 (10일)
+        <div className="flex gap-1.5 shrink-0">
+          <button
+            onClick={() => setRawMode((v) => !v)}
+            className={`text-[11px] px-2 py-1 rounded transition-colors ${
+              rawMode
+                ? "bg-yellow-600 text-white"
+                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+            }`}
+            title="텍스트 뷰 (드래그 선택용)"
+          >
+            텍스트
+          </button>
+          <button
+            onClick={handleCopy}
+            className={`text-[11px] px-2 py-1 rounded transition-colors ${
+              copied
+                ? "bg-green-600 text-white"
+                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+            }`}
+            title="전체 메시지 클립보드 복사"
+          >
+            {copied ? "복사됨" : "전체 복사"}
+          </button>
         </div>
       </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+
+      {/* 메시지 영역 */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
         {loading ? (
           <div className="text-center text-gray-500 text-xs py-8">
             메시지 로딩 중...
@@ -84,71 +149,79 @@ export function ChatView({ chat, messages, loading }: Props) {
           <div className="text-center text-gray-500 text-xs py-8">
             메시지가 없습니다
           </div>
+        ) : rawMode ? (
+          /* 텍스트 뷰: 드래그 선택 쉬운 평문 */
+          <pre className="p-4 text-xs text-gray-300 font-mono whitespace-pre-wrap break-words leading-5 select-all">
+            {toPlainText(messages)}
+          </pre>
         ) : (
-          sorted.map((m, i) => {
-            const prev = i > 0 ? sorted[i - 1] : null;
-            const showDate =
-              !prev || dateKey(prev.timestamp) !== dateKey(m.timestamp);
-            const isSystem =
-              m.type !== "text" && m.type !== "image" && m.type !== "photo";
-            const showSender =
-              !m.is_from_me &&
-              !isSystem &&
-              (!prev ||
-                prev.sender_id !== m.sender_id ||
-                prev.is_from_me !== m.is_from_me);
+          /* 말풍선 뷰 */
+          <div className="px-4 py-3 space-y-2">
+            {sorted.map((m, i) => {
+              const prev = i > 0 ? sorted[i - 1] : null;
+              const showDate =
+                !prev || dateKey(prev.timestamp) !== dateKey(m.timestamp);
+              const isSystem =
+                m.type !== "text" && m.type !== "image" && m.type !== "photo";
+              const showSender =
+                !m.is_from_me &&
+                !isSystem &&
+                (!prev ||
+                  prev.sender_id !== m.sender_id ||
+                  prev.is_from_me !== m.is_from_me);
 
-            return (
-              <div key={m.id}>
-                {showDate && (
-                  <div className="text-center my-3">
-                    <span className="text-[10px] text-gray-500 bg-gray-800 px-2 py-0.5 rounded">
-                      {formatDateLabel(m.timestamp)}
-                    </span>
-                  </div>
-                )}
-                {isSystem ? (
-                  <div className="text-center my-1">
-                    <span className="text-[10px] text-gray-600">
-                      {m.text || `[${m.type}]`}
-                    </span>
-                  </div>
-                ) : (
-                  <div
-                    className={`flex ${
-                      m.is_from_me ? "justify-end" : "justify-start"
-                    }`}
-                  >
-                    <div className="max-w-[70%]">
-                      {showSender && (
-                        <div className="text-[10px] text-gray-500 mb-0.5 ml-1">
-                          {m.sender_id.slice(-6)}
-                        </div>
-                      )}
-                      <div
-                        className={`px-3 py-1.5 rounded-lg text-sm ${
-                          m.is_from_me
-                            ? "bg-blue-600 text-white rounded-br-sm"
-                            : "bg-gray-800 text-gray-100 rounded-bl-sm"
-                        }`}
-                      >
-                        <div className="whitespace-pre-wrap break-words">
-                          {m.text || `[${m.type}]`}
-                        </div>
+              return (
+                <div key={m.id}>
+                  {showDate && (
+                    <div className="text-center my-3">
+                      <span className="text-[10px] text-gray-500 bg-gray-800 px-2 py-0.5 rounded">
+                        {formatDateLabel(m.timestamp)}
+                      </span>
+                    </div>
+                  )}
+                  {isSystem ? (
+                    <div className="text-center my-1">
+                      <span className="text-[10px] text-gray-600">
+                        {m.text || `[${m.type}]`}
+                      </span>
+                    </div>
+                  ) : (
+                    <div
+                      className={`flex ${
+                        m.is_from_me ? "justify-end" : "justify-start"
+                      }`}
+                    >
+                      <div className="max-w-[70%]">
+                        {showSender && (
+                          <div className="text-[10px] text-gray-500 mb-0.5 ml-1">
+                            {m.sender_id.slice(-6)}
+                          </div>
+                        )}
                         <div
-                          className={`text-[9px] mt-0.5 ${
-                            m.is_from_me ? "text-blue-200" : "text-gray-500"
+                          className={`px-3 py-1.5 rounded-lg text-sm ${
+                            m.is_from_me
+                              ? "bg-blue-600 text-white rounded-br-sm"
+                              : "bg-gray-800 text-gray-100 rounded-bl-sm"
                           }`}
                         >
-                          {formatTime(m.timestamp)}
+                          <div className="whitespace-pre-wrap break-words">
+                            {m.text || `[${m.type}]`}
+                          </div>
+                          <div
+                            className={`text-[9px] mt-0.5 ${
+                              m.is_from_me ? "text-blue-200" : "text-gray-500"
+                            }`}
+                          >
+                            {formatTime(m.timestamp)}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            );
-          })
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
