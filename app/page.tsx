@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Category, Chat, Message } from "@/lib/types";
 import { ChatList } from "@/components/ChatList";
 import { ChatView } from "@/components/ChatView";
@@ -14,6 +14,10 @@ export default function Home() {
   const [filter, setFilter] = useState<"all" | "client" | "casual">("all");
   const [chatsLoading, setChatsLoading] = useState(false);
 
+  // chats를 ref로도 유지 — loadMessages에서 최신값 참조용
+  const chatsRef = useRef<Chat[]>([]);
+  useEffect(() => { chatsRef.current = chats; }, [chats]);
+
   const loadChats = useCallback(() => {
     setChatsLoading(true);
     fetch("/api/chats")
@@ -23,30 +27,36 @@ export default function Home() {
       .finally(() => setChatsLoading(false));
   }, []);
 
-  // 채팅 목록 최초 로드
   useEffect(() => { loadChats(); }, [loadChats]);
 
-  // 메시지 로드 (10명 이하 방은 50일, 그 외 10일)
-  useEffect(() => {
-    if (!selectedChatId) return;
-    const chat = chats.find((c) => c.id === selectedChatId);
+  const loadMessages = useCallback((chatId: string) => {
+    const chat = chatsRef.current.find((c) => c.id === chatId);
     const memberCount = chat?.member_count ?? 0;
     setMessagesLoading(true);
-    fetch(`/api/messages?chatId=${selectedChatId}&memberCount=${memberCount}`)
+    fetch(`/api/messages?chatId=${chatId}&memberCount=${memberCount}`)
       .then((r) => r.json())
       .then((data) => setMessages(Array.isArray(data) ? data : []))
       .catch(() => setMessages([]))
       .finally(() => setMessagesLoading(false));
-  }, [selectedChatId, chats]);
+  }, []);
+
+  // 채팅방 선택 시 메시지 로드
+  useEffect(() => {
+    if (!selectedChatId) return;
+    loadMessages(selectedChatId);
+  }, [selectedChatId, loadMessages]);
 
   const handleSelect = useCallback((id: string) => {
     setSelectedChatId(id);
     setMessages([]);
   }, []);
 
+  const handleRefreshMessages = useCallback(() => {
+    if (selectedChatId) loadMessages(selectedChatId);
+  }, [selectedChatId, loadMessages]);
+
   const handleCategoryChange = useCallback(
     async (chatId: string, category: Category | null) => {
-      // 로컬 상태 즉시 반영
       setChats((prev) =>
         prev.map((c) => (c.id === chatId ? { ...c, category } : c)),
       );
@@ -84,6 +94,7 @@ export default function Home() {
           chat={selectedChat}
           messages={messages}
           loading={messagesLoading}
+          onRefresh={handleRefreshMessages}
         />
       </div>
       <div className="w-72 shrink-0 h-full">
