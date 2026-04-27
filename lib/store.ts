@@ -1,6 +1,6 @@
 // SQLite 기반 저장소 (better-sqlite3, 동기 API를 async로 래핑)
 import { getDb } from "./db";
-import type { Analysis, CategoriesFile, Category, Urgency } from "./types";
+import type { Analysis, CategoriesFile, Category, Message, Urgency } from "./types";
 
 interface CategoryRow {
   chat_id: string;
@@ -15,6 +15,18 @@ interface AnalysisRow {
   next_action: string;
   analyzed_at: string;
 }
+
+interface MessageRow {
+  id: string;
+  chat_id: string;
+  sender_id: string;
+  text: string;
+  is_from_me: number;
+  timestamp: string;
+  type: string;
+}
+
+// ─── categories ──────────────────────────────────────────────────────────────
 
 export async function getCategories(): Promise<CategoriesFile> {
   const db = getDb();
@@ -35,6 +47,8 @@ export async function setCategory(
     ).run(chatId, category);
   }
 }
+
+// ─── analyses ────────────────────────────────────────────────────────────────
 
 export async function getTodoForChat(chatId: string): Promise<Analysis | null> {
   const db = getDb();
@@ -77,4 +91,53 @@ export async function setTodoForChat(
     analysis.nextAction,
     analysis.analyzedAt,
   );
+}
+
+// ─── messages (캐시) ─────────────────────────────────────────────────────────
+
+function rowToMessage(row: MessageRow): Message {
+  return {
+    id: row.id,
+    chat_id: row.chat_id,
+    sender_id: row.sender_id,
+    text: row.text,
+    is_from_me: row.is_from_me === 1,
+    timestamp: row.timestamp,
+    type: row.type,
+  };
+}
+
+export function getCachedMessages(chatId: string): Message[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      "SELECT * FROM messages WHERE chat_id = ? ORDER BY timestamp ASC",
+    )
+    .all(chatId) as MessageRow[];
+  return rows.map(rowToMessage);
+}
+
+// INSERT OR IGNORE: 이미 있는 id는 건너뜀 (중복 방지)
+export function upsertMessages(messages: Message[]): void {
+  if (messages.length === 0) return;
+  const db = getDb();
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO messages
+     (id, chat_id, sender_id, text, is_from_me, timestamp, type)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const insertMany = db.transaction((msgs: Message[]) => {
+    for (const m of msgs) {
+      insert.run(
+        m.id,
+        m.chat_id,
+        m.sender_id,
+        m.text,
+        m.is_from_me ? 1 : 0,
+        m.timestamp,
+        m.type,
+      );
+    }
+  });
+  insertMany(messages);
 }

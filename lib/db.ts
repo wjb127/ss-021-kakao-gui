@@ -23,13 +23,29 @@ export function getDb(): Database.Database {
     );
 
     CREATE TABLE IF NOT EXISTS analyses (
-      chat_id    TEXT PRIMARY KEY,
-      summary    TEXT NOT NULL,
-      urgency    TEXT NOT NULL,
-      todos      TEXT NOT NULL,
+      chat_id     TEXT PRIMARY KEY,
+      summary     TEXT NOT NULL,
+      urgency     TEXT NOT NULL,
+      todos       TEXT NOT NULL,
       next_action TEXT NOT NULL,
       analyzed_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id          TEXT PRIMARY KEY,
+      chat_id     TEXT NOT NULL,
+      sender_id   TEXT NOT NULL,
+      text        TEXT NOT NULL,
+      is_from_me  INTEGER NOT NULL,
+      timestamp   TEXT NOT NULL,
+      type        TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_chat_id
+      ON messages(chat_id);
+
+    CREATE INDEX IF NOT EXISTS idx_messages_timestamp
+      ON messages(chat_id, timestamp);
   `);
 
   return _db;
