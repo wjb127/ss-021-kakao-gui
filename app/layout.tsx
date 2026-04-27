@@ -13,8 +13,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "카카오톡 인박스",
+  title: "카카오 인박스",
   description: "로컬 카카오톡 인박스 관리 GUI",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "카카오 인박스",
+  },
 };
 
 export default function RootLayout({
@@ -24,9 +30,13 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        <meta name="theme-color" content="#111827" />
+        <link rel="apple-touch-icon" href="/icon.svg" />
+      </head>
       <body className="h-full overflow-hidden">{children}</body>
     </html>
   );
