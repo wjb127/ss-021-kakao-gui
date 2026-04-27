@@ -80,7 +80,7 @@ export function AIPanel({ chat }: Props) {
 
   if (!chat) {
     return (
-      <div className="w-80 bg-gray-900 border-l border-gray-800 p-4 text-xs text-gray-500">
+      <div className="w-full h-full bg-gray-900 border-l border-gray-800 p-4 text-xs text-gray-500">
         채팅을 선택하면 AI 분석이 표시됩니다
       </div>
     );
@@ -88,7 +88,7 @@ export function AIPanel({ chat }: Props) {
 
   if (chat.category !== "client") {
     return (
-      <div className="w-80 bg-gray-900 border-l border-gray-800 p-4">
+      <div className="w-full h-full bg-gray-900 border-l border-gray-800 p-4">
         <div className="text-xs text-gray-500">
           AI 분석은 <span className="text-blue-400">고객</span> 카테고리 채팅에만
           제공됩니다
@@ -101,7 +101,7 @@ export function AIPanel({ chat }: Props) {
   }
 
   return (
-    <div className="w-80 bg-gray-900 border-l border-gray-800 flex flex-col">
+    <div className="w-full h-full bg-gray-900 border-l border-gray-800 flex flex-col">
       <div className="p-3 border-b border-gray-800">
         <h2 className="text-sm font-bold text-gray-200">AI 분석</h2>
         <div className="text-[10px] text-gray-500 truncate">
