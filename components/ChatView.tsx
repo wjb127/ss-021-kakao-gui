@@ -9,6 +9,7 @@ interface Props {
   messages: Message[];
   loading: boolean;
   onRefresh: () => void;
+  onRestore?: () => void;
 }
 
 function dateKey(iso: string): string {
@@ -79,7 +80,7 @@ function toPlainText(messages: Message[]): string {
     .join("\n");
 }
 
-export function ChatView({ chat, messages, loading, onRefresh }: Props) {
+export function ChatView({ chat, messages, loading, onRefresh, onRestore }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [rawMode, setRawMode] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -156,6 +157,16 @@ export function ChatView({ chat, messages, loading, onRefresh }: Props) {
           >
             텍스트
           </button>
+          {/* 대화 복원 버튼 */}
+          {onRestore && (
+            <button
+              onClick={onRestore}
+              className="text-[11px] px-2 py-1 rounded transition-colors bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
+              title="외부 대화 붙여넣기로 복원"
+            >
+              대화복원
+            </button>
+          )}
           {/* 전체 복사 버튼 */}
           <button
             onClick={handleCopy}

@@ -77,7 +77,7 @@ function MemoCard({
     : chat.display_name;
 
   return (
-    <div className="flex flex-col h-full w-56 shrink-0 bg-white border border-[#D6D8DF] rounded-lg overflow-hidden shadow-sm">
+    <div className="flex flex-col w-56 shrink-0 bg-white border border-[#D6D8DF] rounded-lg overflow-hidden shadow-sm" style={{ height: "calc(100vh - 56px - 2rem)" }}>
       {/* 카드 헤더 */}
       <div className="px-3 pt-3 pb-2 border-b border-[#E8E9EC]">
         <button
@@ -201,8 +201,8 @@ export function BoardView({
       </div>
 
       {/* 카드 가로 스크롤 영역 */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden">
-        <div className="flex gap-3 h-full px-4 py-4 w-max">
+      <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
+        <div className="flex gap-3 h-full px-4 py-4" style={{ width: "max-content" }}>
           {filtered.length === 0 ? (
             <div className="flex items-center justify-center w-64 text-sm text-[#9CA3AF]">
               채팅방이 없습니다

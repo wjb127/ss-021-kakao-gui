@@ -7,6 +7,8 @@ import { ChatView } from "@/components/ChatView";
 import { AIPanel } from "@/components/AIPanel";
 import { BoardView } from "@/components/BoardView";
 import { SettingsModal } from "@/components/SettingsModal";
+import { NewChatModal } from "@/components/NewChatModal";
+import { RestoreModal } from "@/components/RestoreModal";
 
 type View = "inbox" | "board";
 
@@ -22,8 +24,9 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [defaultView, setDefaultView] = useState<View>("inbox");
   const [defaultFilter, setDefaultFilter] = useState<"all" | "client" | "casual">("all");
+  const [newChatOpen, setNewChatOpen] = useState(false);
+  const [restoreChatId, setRestoreChatId] = useState<string | null>(null);
 
-  // localStorage에서 설정 로드
   useEffect(() => {
     const dv = localStorage.getItem("defaultView") as View | null;
     const df = localStorage.getItem("defaultFilter") as "all" | "client" | "casual" | null;
@@ -49,7 +52,11 @@ export default function Home() {
     const chat = chatsRef.current.find((c) => c.id === chatId);
     const memberCount = chat?.member_count ?? 0;
     setMessagesLoading(true);
-    fetch(`/api/messages?chatId=${chatId}&memberCount=${memberCount}`)
+    // manual chat은 캐시에서만 읽음
+    const url = chatId.startsWith("manual_")
+      ? `/api/messages?chatId=${chatId}&memberCount=0&manualOnly=true`
+      : `/api/messages?chatId=${chatId}&memberCount=${memberCount}`;
+    fetch(url)
       .then((r) => r.json())
       .then((data) => setMessages(Array.isArray(data) ? data : []))
       .catch(() => setMessages([]))
@@ -88,7 +95,36 @@ export default function Home() {
     [],
   );
 
-  // 보드 → 인박스 전환 (채팅방 선택 포함)
+  function handleNewChatCreated(id: string, name: string) {
+    setChats((prev) => [
+      {
+        id,
+        display_name: name,
+        member_count: 2,
+        unread_count: 0,
+        last_message_at: new Date().toISOString(),
+        category: null,
+      },
+      ...prev,
+    ]);
+    setSelectedChatId(id);
+    setMessages([]);
+    setView("inbox");
+  }
+
+  async function handleDeleteChat(chatId: string) {
+    await fetch("/api/manual-chat", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId }),
+    });
+    setChats((prev) => prev.filter((c) => c.id !== chatId));
+    if (selectedChatId === chatId) {
+      setSelectedChatId(null);
+      setMessages([]);
+    }
+  }
+
   function switchToInbox(chatId?: string) {
     setView("inbox");
     if (chatId) {
@@ -109,6 +145,7 @@ export default function Home() {
   }
 
   const selectedChat = chats.find((c) => c.id === selectedChatId) ?? null;
+  const restoreChat = chats.find((c) => c.id === restoreChatId) ?? null;
 
   // ── 보드 뷰 ────────────────────────────────────────────────
   if (view === "board") {
@@ -154,6 +191,8 @@ export default function Home() {
             onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
             onSwitchToBoard={() => setView("board")}
             onOpenSettings={() => setSettingsOpen(true)}
+            onNewChat={() => setNewChatOpen(true)}
+            onDeleteChat={handleDeleteChat}
           />
         </div>
         <div className="flex-1 h-full min-w-0">
@@ -162,12 +201,32 @@ export default function Home() {
             messages={messages}
             loading={messagesLoading}
             onRefresh={handleRefreshMessages}
+            onRestore={selectedChat ? () => setRestoreChatId(selectedChat.id) : undefined}
           />
         </div>
         <div className="w-72 shrink-0 h-full">
           <AIPanel chat={selectedChat} />
         </div>
       </div>
+
+      <NewChatModal
+        open={newChatOpen}
+        onClose={() => setNewChatOpen(false)}
+        onCreate={handleNewChatCreated}
+      />
+
+      {restoreChat && (
+        <RestoreModal
+          open={!!restoreChatId}
+          chatId={restoreChat.id}
+          chatName={restoreChat.display_name || restoreChat.id}
+          onClose={() => setRestoreChatId(null)}
+          onSuccess={() => {
+            if (restoreChatId) loadMessages(restoreChatId);
+          }}
+        />
+      )}
+
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}

@@ -15,6 +15,11 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // manual chat은 kakaocli 호출 없이 캐시만 반환
+  if (chatId.startsWith("manual_")) {
+    return NextResponse.json(getCachedMessages(chatId));
+  }
+
   const memberCount = parseInt(
     req.nextUrl.searchParams.get("memberCount") || "0",
     10,

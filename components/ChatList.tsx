@@ -17,6 +17,8 @@ interface Props {
   onToggleCollapse: () => void;
   onSwitchToBoard: () => void;
   onOpenSettings: () => void;
+  onNewChat: () => void;
+  onDeleteChat: (chatId: string) => void;
 }
 
 // 카테고리 배지 스타일 — 10% 포인트 컬러 기반
@@ -138,6 +140,8 @@ export function ChatList({
   onToggleCollapse,
   onSwitchToBoard,
   onOpenSettings,
+  onNewChat,
+  onDeleteChat,
 }: Props) {
   const filtered = useMemo(() => {
     const list =
@@ -201,6 +205,16 @@ export function ChatList({
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-sm font-bold text-[#1A1F36]">카카오톡 인박스</h1>
           <div className="flex items-center gap-1.5">
+            {/* 새 대화 추가 */}
+            <button
+              onClick={onNewChat}
+              className="text-[#6B7280] hover:text-[#1A1F36] transition-colors"
+              title="새 대화 추가"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
             {/* 보드 뷰 전환 */}
             <button
               onClick={onSwitchToBoard}
@@ -300,6 +314,15 @@ export function ChatList({
                     <span className="text-[10px] bg-red-500 text-white rounded-full px-1.5 py-0.5 shrink-0">
                       {c.unread_count > 999 ? "999+" : c.unread_count}
                     </span>
+                  )}
+                  {c.id.startsWith("manual_") && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDeleteChat(c.id); }}
+                      className="text-[10px] text-[#9CA3AF] hover:text-red-500 transition-colors shrink-0"
+                      title="대화 삭제"
+                    >
+                      ×
+                    </button>
                   )}
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-[#6B7280]">

@@ -93,6 +93,41 @@ export async function setTodoForChat(
   );
 }
 
+// ─── manual_chats ────────────────────────────────────────────────────────────
+
+interface ManualChatRow {
+  id: string;
+  display_name: string;
+  created_at: string;
+  last_message_at: string;
+}
+
+export function getManualChats(): ManualChatRow[] {
+  const db = getDb();
+  return db.prepare("SELECT * FROM manual_chats ORDER BY last_message_at DESC").all() as ManualChatRow[];
+}
+
+export function createManualChat(displayName: string): string {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const id = `manual_${Date.now()}`;
+  db.prepare(
+    "INSERT INTO manual_chats (id, display_name, created_at, last_message_at) VALUES (?, ?, ?, ?)",
+  ).run(id, displayName, now, now);
+  return id;
+}
+
+export function deleteManualChat(id: string): void {
+  const db = getDb();
+  db.prepare("DELETE FROM manual_chats WHERE id = ?").run(id);
+  db.prepare("DELETE FROM messages WHERE chat_id = ?").run(id);
+}
+
+export function updateManualChatLastMessage(id: string, timestamp: string): void {
+  const db = getDb();
+  db.prepare("UPDATE manual_chats SET last_message_at = ? WHERE id = ?").run(timestamp, id);
+}
+
 // ─── memos ───────────────────────────────────────────────────────────────────
 
 export function getMemo(chatId: string): string {
