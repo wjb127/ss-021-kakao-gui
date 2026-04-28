@@ -19,7 +19,7 @@ interface ClaudeRun {
   project_path: string;
   prompt: string;
   output: string;
-  status: "running" | "success" | "error";
+  status: "running" | "success" | "error" | "cancelled";
   exit_code: number | null;
   started_at: string;
   finished_at: string | null;
@@ -33,6 +33,7 @@ export function ClaudeRunModal({ open, onClose, chatId, displayName, projectPath
   const [run, setRun] = useState<ClaudeRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   // 모달 닫힐 때 상태 리셋
   useEffect(() => {
@@ -117,6 +118,25 @@ export function ClaudeRunModal({ open, onClose, chatId, displayName, projectPath
     }
   }
 
+  async function cancel() {
+    if (!runId || cancelling) return;
+    if (!confirm("실행 중인 Claude 프로세스를 종료할까?")) return;
+    setCancelling(true);
+    try {
+      const res = await fetch("/api/claude-runs/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: runId }),
+      });
+      const data = await res.json();
+      if (!res.ok) setError(data?.error || "취소 실패");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   if (!open) return null;
 
   const statusBadge = run?.status === "running"
@@ -125,7 +145,9 @@ export function ClaudeRunModal({ open, onClose, chatId, displayName, projectPath
       ? { label: "완료", cls: "bg-green-100 text-green-700" }
       : run?.status === "error"
         ? { label: "에러", cls: "bg-red-100 text-red-700" }
-        : null;
+        : run?.status === "cancelled"
+          ? { label: "취소됨", cls: "bg-gray-200 text-gray-700" }
+          : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
@@ -218,12 +240,23 @@ export function ClaudeRunModal({ open, onClose, chatId, displayName, projectPath
               </button>
             </>
           ) : (
-            <button
-              onClick={onClose}
-              className="text-xs px-3 py-1.5 rounded bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
-            >
-              닫기 (백그라운드 계속 실행)
-            </button>
+            <>
+              {run?.status === "running" && (
+                <button
+                  onClick={cancel}
+                  disabled={cancelling}
+                  className="text-xs px-3 py-1.5 rounded bg-red-500 text-white hover:bg-red-600 disabled:bg-[#9CA3AF]"
+                >
+                  {cancelling ? "종료 중..." : "프로세스 종료"}
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="text-xs px-3 py-1.5 rounded bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
+              >
+                {run?.status === "running" ? "닫기 (백그라운드 계속)" : "닫기"}
+              </button>
+            </>
           )}
         </div>
       </div>

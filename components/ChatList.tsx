@@ -156,7 +156,7 @@ export function ChatList({
   // ── 접힌 상태 ──────────────────────────────────────────
   if (collapsed) {
     return (
-      <div className="flex flex-col h-full bg-[#D6D8DF] border-r border-[#D6D8DF] items-center">
+      <div className="flex flex-col h-full w-full bg-[#D6D8DF] border-r border-[#D6D8DF] items-center">
         {/* 펼치기 버튼 */}
         <button
           onClick={onToggleCollapse}
@@ -199,7 +199,7 @@ export function ChatList({
 
   return (
     /* 사이드바: 60% 배경 #D6D8DF */
-    <div className="flex flex-col h-full bg-[#D6D8DF] border-r border-[#D6D8DF]">
+    <div className="flex flex-col h-full w-full min-w-0 bg-[#D6D8DF] border-r border-[#D6D8DF]">
       {/* 헤더 영역: 30% 흰 패널 */}
       <div className="p-3 border-b border-[#D6D8DF] bg-white">
         <div className="flex items-center justify-between mb-2">
@@ -291,21 +291,29 @@ export function ChatList({
           filtered.map((c) => {
             const isSelected = selectedChatId === c.id;
             return (
-              <button
+              <div
                 key={c.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelect(c.id)}
-                className={`w-full text-left px-3 py-2 border-b border-[#C8CAD1] transition-colors ${
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelect(c.id);
+                  }
+                }}
+                className={`w-full text-left px-3 py-2 border-b border-[#C8CAD1] transition-colors cursor-pointer min-w-0 ${
                   isSelected
                     ? "bg-[#E8ECF5] border-l-2 border-l-[#2959AA]"
                     : "hover:bg-[#E0E2E8]"
                 }`}
               >
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-1 min-w-0">
                   <CategoryDropdown
                     category={c.category}
                     onSelect={(cat) => onCategoryChange(c.id, cat)}
                   />
-                  <span className="text-sm text-[#1A1F36] truncate flex-1">
+                  <span className="text-sm text-[#1A1F36] truncate flex-1 min-w-0">
                     {(!c.display_name || c.display_name === "(unknown)")
                       ? `(멤버 ${c.member_count}명)`
                       : c.display_name}
@@ -329,7 +337,7 @@ export function ChatList({
                   <span>👥 {c.member_count}</span>
                   <span>{formatTime(c.last_message_at)}</span>
                 </div>
-              </button>
+              </div>
             );
           })
         )}

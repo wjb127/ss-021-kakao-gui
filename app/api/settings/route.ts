@@ -1,31 +1,24 @@
-// 앱 전역 설정 (ntfy 토픽, 워커 on/off 등)
+// 앱 전역 설정 (텔레그램 봇, 워커 on/off 등)
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getSetting, setSetting } from "@/lib/store";
-import { generateTopic } from "@/lib/ntfy";
 
 export const dynamic = "force-dynamic";
 
 const KEYS = [
-  "ntfy_topic",
-  "ntfy_enabled",
+  "telegram_bot_token",
+  "telegram_chat_id",
+  "telegram_enabled",
   "worker_enabled",
   "app_url",
   "claude_skip_permissions",
   "send_enabled",
+  "poll_interval_sec",
 ] as const;
 
 export async function GET() {
-  // 토픽 없으면 자동 생성
-  let topic = getSetting("ntfy_topic");
-  if (!topic) {
-    topic = generateTopic();
-    setSetting("ntfy_topic", topic);
-  }
-
-  const result: Record<string, string> = { ntfy_topic: topic };
+  const result: Record<string, string> = {};
   for (const k of KEYS) {
-    if (k === "ntfy_topic") continue;
     result[k] = getSetting(k) ?? "";
   }
   return NextResponse.json(result);

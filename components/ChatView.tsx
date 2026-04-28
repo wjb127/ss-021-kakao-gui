@@ -110,7 +110,7 @@ export function ChatView({ chat, messages, loading, onRefresh, onRestore, onBack
 
   if (!chat) {
     return (
-      <div className="flex h-full items-center justify-center bg-[#F5F6F8] text-[#6B7280] text-sm">
+      <div className="flex w-full h-full items-center justify-center bg-[#F5F6F8] text-[#6B7280] text-sm">
         왼쪽에서 채팅을 선택하세요
       </div>
     );
@@ -118,7 +118,7 @@ export function ChatView({ chat, messages, loading, onRefresh, onRestore, onBack
 
   return (
     /* 메시지 영역 전체: 30% 서피스 #F5F6F8 */
-    <div className="flex flex-col h-full bg-[#F5F6F8]">
+    <div className="flex flex-col h-full w-full min-w-0 bg-[#F5F6F8]">
       {/* 헤더: 흰 배경, 하단 보더 */}
       <div className="px-4 py-3 border-b border-[#D6D8DF] bg-white flex items-start justify-between gap-2">
         <div className="min-w-0 flex items-start gap-2">

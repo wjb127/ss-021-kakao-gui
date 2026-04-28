@@ -13,12 +13,14 @@ interface Props {
 }
 
 interface ServerSettings {
-  ntfy_topic: string;
-  ntfy_enabled: string;
+  telegram_bot_token: string;
+  telegram_chat_id: string;
+  telegram_enabled: string;
   worker_enabled: string;
   app_url: string;
   claude_skip_permissions: string;
   send_enabled: string;
+  poll_interval_sec: string;
 }
 
 export function SettingsModal({
@@ -31,9 +33,13 @@ export function SettingsModal({
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [settings, setSettings] = useState<ServerSettings | null>(null);
-  const [copied, setCopied] = useState(false);
   const [testing, setTesting] = useState<"" | "ok" | "fail" | "sending">("");
   const [appUrlDraft, setAppUrlDraft] = useState("");
+  const [pollSecDraft, setPollSecDraft] = useState("30");
+  const [tokenDraft, setTokenDraft] = useState("");
+  const [chatIdDraft, setChatIdDraft] = useState("");
+  const [initStatus, setInitStatus] = useState<"" | "ok" | "fail" | "sending">("");
+  const [initError, setInitError] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -42,6 +48,9 @@ export function SettingsModal({
       .then((s: ServerSettings) => {
         setSettings(s);
         setAppUrlDraft(s.app_url || "");
+        setPollSecDraft(s.poll_interval_sec || "30");
+        setTokenDraft(s.telegram_bot_token || "");
+        setChatIdDraft(s.telegram_chat_id || "");
       })
       .catch(() => {});
   }, [open]);
@@ -77,11 +86,28 @@ export function SettingsModal({
     });
   }
 
-  async function copyTopic() {
-    if (!settings?.ntfy_topic) return;
-    await navigator.clipboard.writeText(settings.ntfy_topic);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  async function autoDetectChatId() {
+    setInitStatus("sending");
+    setInitError("");
+    try {
+      // 토큰 먼저 저장 (없으면 init 라우트가 거부)
+      if (tokenDraft.trim()) {
+        await patch({ telegram_bot_token: tokenDraft.trim() });
+      }
+      const r = await fetch("/api/telegram/init", { method: "POST" });
+      const d = (await r.json()) as { ok?: boolean; chatId?: string; error?: string };
+      if (d.ok && d.chatId) {
+        setChatIdDraft(d.chatId);
+        setInitStatus("ok");
+      } else {
+        setInitStatus("fail");
+        setInitError(d.error || "감지 실패");
+      }
+    } catch (e) {
+      setInitStatus("fail");
+      setInitError(String(e));
+    }
+    setTimeout(() => setInitStatus(""), 3000);
   }
 
   async function testPush() {
@@ -153,54 +179,123 @@ export function SettingsModal({
             </div>
           </div>
 
-          {/* 푸시 알림 (ntfy) */}
+          {/* 푸시 알림 (텔레그램) */}
           <div className="pt-3 border-t border-[#E8E9EC]">
-            <div className="text-xs font-medium text-[#1A1F36] mb-2">푸시 알림 (ntfy.sh)</div>
+            <div className="text-xs font-medium text-[#1A1F36] mb-2">푸시 알림 (텔레그램)</div>
 
-            {/* 토픽 */}
+            {/* 봇 토큰 */}
             <div className="mb-2">
-              <div className="text-[10px] text-[#6B7280] mb-1">토픽 (모바일 앱에서 구독)</div>
+              <div className="text-[10px] text-[#6B7280] mb-1">봇 토큰 (BotFather)</div>
               <div className="flex gap-1">
                 <input
-                  readOnly
-                  value={settings?.ntfy_topic || "..."}
-                  className="flex-1 text-[10px] font-mono px-2 py-1.5 bg-[#F5F6F8] border border-[#D6D8DF] rounded"
+                  type="password"
+                  value={tokenDraft}
+                  onChange={(e) => setTokenDraft(e.target.value)}
+                  placeholder="123456:AAH..."
+                  className="flex-1 text-[10px] font-mono px-2 py-1.5 bg-white border border-[#D6D8DF] rounded"
                 />
                 <button
-                  onClick={copyTopic}
-                  className={`text-[10px] px-2 py-1.5 rounded transition-colors ${
-                    copied
-                      ? "bg-green-500 text-white"
-                      : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
-                  }`}
+                  onClick={() => patch({ telegram_bot_token: tokenDraft.trim() })}
+                  className="text-[10px] px-2 py-1.5 rounded bg-[#2959AA] text-white hover:bg-[#1F4485]"
                 >
-                  {copied ? "✓" : "복사"}
+                  저장
                 </button>
               </div>
+            </div>
+
+            {/* Chat ID + 자동 감지 */}
+            <div className="mb-2">
+              <div className="text-[10px] text-[#6B7280] mb-1">Chat ID</div>
+              <div className="flex gap-1">
+                <input
+                  value={chatIdDraft}
+                  onChange={(e) => setChatIdDraft(e.target.value)}
+                  placeholder="봇과 /start 후 자동 감지"
+                  className="flex-1 text-[10px] font-mono px-2 py-1.5 bg-white border border-[#D6D8DF] rounded"
+                />
+                <button
+                  onClick={autoDetectChatId}
+                  disabled={initStatus === "sending"}
+                  className={`text-[10px] px-2 py-1.5 rounded transition-colors ${
+                    initStatus === "ok"
+                      ? "bg-green-500 text-white"
+                      : initStatus === "fail"
+                        ? "bg-red-500 text-white"
+                        : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
+                  }`}
+                >
+                  {initStatus === "sending"
+                    ? "..."
+                    : initStatus === "ok"
+                      ? "✓"
+                      : initStatus === "fail"
+                        ? "✗"
+                        : "자동"}
+                </button>
+                <button
+                  onClick={() => patch({ telegram_chat_id: chatIdDraft.trim() })}
+                  className="text-[10px] px-2 py-1.5 rounded bg-[#2959AA] text-white hover:bg-[#1F4485]"
+                >
+                  저장
+                </button>
+              </div>
+              {initError && (
+                <div className="text-[10px] text-red-600 mt-1 leading-tight">{initError}</div>
+              )}
               <div className="text-[10px] text-[#9CA3AF] mt-1 leading-tight">
-                ntfy 앱 설치 → 토픽 구독 → 카톡 새 메시지 시 푸시 수신
+                BotFather로 봇 생성 → 토큰 저장 → 봇과 /start → 자동 버튼
               </div>
             </div>
 
             {/* 워커 토글 */}
             <ToggleRow
               label="카톡 폴링 워커"
-              hint="30초마다 새 메시지 검사"
+              hint="주기적으로 새 메시지 검사"
               on={settings?.worker_enabled === "1"}
               onChange={(v) => patch({ worker_enabled: v ? "1" : "0" })}
             />
 
+            {/* 폴링 인터벌 */}
+            <div className="mt-1 mb-2">
+              <div className="text-[10px] text-[#6B7280] mb-1">폴링 주기 (초, 30~600)</div>
+              <div className="flex gap-1">
+                <input
+                  type="number"
+                  min={30}
+                  max={600}
+                  step={10}
+                  value={pollSecDraft}
+                  onChange={(e) => setPollSecDraft(e.target.value)}
+                  className="flex-1 text-[10px] px-2 py-1.5 bg-white border border-[#D6D8DF] rounded"
+                />
+                <button
+                  onClick={() => {
+                    const n = parseInt(pollSecDraft, 10);
+                    const clamped = Math.max(30, Math.min(600, Number.isFinite(n) ? n : 30));
+                    setPollSecDraft(String(clamped));
+                    void patch({ poll_interval_sec: String(clamped) });
+                  }}
+                  className="text-[10px] px-2 py-1.5 rounded bg-[#2959AA] text-white hover:bg-[#1F4485]"
+                >
+                  저장
+                </button>
+              </div>
+              <div className="text-[10px] text-[#9CA3AF] mt-1 leading-tight">
+                짧을수록 반응 빠름. kakaocli 부하 고려해 60~120초 권장
+              </div>
+            </div>
+
             {/* 알림 토글 */}
             <ToggleRow
-              label="ntfy 푸시 전송"
-              hint="새 메시지 발견 시 토픽으로 푸시"
-              on={settings?.ntfy_enabled === "1"}
-              onChange={(v) => patch({ ntfy_enabled: v ? "1" : "0" })}
+              label="텔레그램 푸시 전송"
+              hint="새 메시지 발견 시 봇으로 푸시"
+              on={settings?.telegram_enabled === "1"}
+              onChange={(v) => patch({ telegram_enabled: v ? "1" : "0" })}
             />
 
-            {/* 앱 URL (푸시 클릭 딥링크) */}
+            {/* 앱 URL (인박스 열기 버튼 딥링크) */}
             <div className="mt-2">
-              <div className="text-[10px] text-[#6B7280] mb-1">앱 URL (푸시 클릭 딥링크)</div>
+              <div className="text-[10px] text-[#6B7280] mb-1">앱 URL (텔레그램 인박스 열기 버튼)</div>
               <div className="flex gap-1">
                 <input
                   type="url"

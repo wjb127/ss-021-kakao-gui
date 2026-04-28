@@ -3,33 +3,51 @@
 
 import { listChats, listMessages } from "./kakaocli";
 import { getLastSeen, setLastSeen, upsertMessages, getSetting } from "./store";
-import { sendPush } from "./ntfy";
+import { sendPush } from "./telegram";
 
-const POLL_INTERVAL_MS = 30 * 1000; // 30초
+const DEFAULT_POLL_SEC = 30;
+const MIN_POLL_SEC = 30;
+const MAX_POLL_SEC = 600;
+
+function getPollIntervalMs(): number {
+  const raw = getSetting("poll_interval_sec");
+  const n = raw ? parseInt(raw, 10) : DEFAULT_POLL_SEC;
+  if (!Number.isFinite(n)) return DEFAULT_POLL_SEC * 1000;
+  return Math.max(MIN_POLL_SEC, Math.min(MAX_POLL_SEC, n)) * 1000;
+}
 
 // HMR/dev 재시작에서 다중 실행 방지
 const GLOBAL_KEY = "__kakaoInboxWorker__";
 
 interface GlobalWithWorker {
-  [GLOBAL_KEY]?: { interval: NodeJS.Timeout; running: boolean };
+  [GLOBAL_KEY]?: { timeout: NodeJS.Timeout | null; running: boolean; stopped: boolean };
 }
 
 export function startWorker(): void {
   const g = globalThis as GlobalWithWorker;
-  if (g[GLOBAL_KEY]?.interval) {
+  if (g[GLOBAL_KEY]?.timeout) {
     console.log("[worker] 이미 실행 중 — 스킵");
     return;
   }
-  console.log("[worker] 폴링 시작 (interval=" + POLL_INTERVAL_MS + "ms)");
+  console.log("[worker] 폴링 시작 (default=" + DEFAULT_POLL_SEC + "s, 매 tick마다 재계산)");
 
-  const state = { interval: null as unknown as NodeJS.Timeout, running: false };
-  state.interval = setInterval(() => {
-    void tick(state);
-  }, POLL_INTERVAL_MS);
+  const state: GlobalWithWorker[typeof GLOBAL_KEY] = {
+    timeout: null,
+    running: false,
+    stopped: false,
+  };
   g[GLOBAL_KEY] = state;
 
-  // 시작 직후 1회 즉시 실행
-  void tick(state);
+  const schedule = (ms: number) => {
+    if (state.stopped) return;
+    state.timeout = setTimeout(async () => {
+      await tick(state);
+      schedule(getPollIntervalMs());
+    }, ms);
+  };
+
+  // 시작 직후 즉시 1회 → 이후 설정값 기반 재귀 스케줄링
+  schedule(0);
 }
 
 async function tick(state: { running: boolean }): Promise<void> {

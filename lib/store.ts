@@ -220,7 +220,7 @@ export function setSetting(key: string, value: string): void {
 
 // ─── claude_runs ─────────────────────────────────────────────────────────────
 
-export type RunStatus = "running" | "success" | "error";
+export type RunStatus = "running" | "success" | "error" | "cancelled";
 
 export interface ClaudeRun {
   id: string;

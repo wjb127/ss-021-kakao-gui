@@ -206,8 +206,8 @@ export default function Home() {
         {/* ChatList */}
         <div
           className={`${showListMobile ? "flex" : "hidden"} md:flex w-full ${
-            sidebarCollapsed ? "md:w-10" : "md:w-64"
-          } md:shrink-0 h-full transition-all duration-200`}
+            sidebarCollapsed ? "md:w-10 md:basis-10" : "md:w-64 md:basis-64"
+          } md:shrink-0 md:grow-0 h-full overflow-hidden transition-all duration-200`}
         >
           <ChatList
             chats={chats}
@@ -246,7 +246,7 @@ export default function Home() {
         <div
           className={`${
             mobileAIOpen ? "fixed inset-0 z-40 flex" : "hidden"
-          } md:relative md:inset-auto md:z-auto md:flex md:w-72 md:shrink-0 h-full bg-white`}
+          } md:relative md:inset-auto md:z-auto md:flex md:w-72 md:basis-72 md:shrink-0 md:grow-0 h-full bg-white overflow-hidden`}
         >
           <AIPanel
             chat={selectedChat}

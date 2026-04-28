@@ -1,6 +1,7 @@
 // AppleScript 기반 카카오톡 자동 발송
 // 전제: 사용자가 카톡 mac 앱에서 대상 채팅방을 미리 열고 입력란 포커스 상태
-// 동작: 클립보드 set → 카톡 활성화 → cmd+v → return
+// 동작: 클립보드 set → frontmost 검증 (KakaoTalk 아니면 에러) → cmd+v → return
+// activate 제거 이유: 강제 포커스 시 입력란 포커스 보장 안됨. 사용자가 직접 카톡 앞으로 두게 함
 
 import { exec, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -27,9 +28,11 @@ function setClipboard(text: string): Promise<void> {
 }
 
 const APPLESCRIPT = `
-tell application "KakaoTalk" to activate
-delay 0.4
 tell application "System Events"
+  set frontApp to name of first application process whose frontmost is true
+  if frontApp is not "KakaoTalk" then
+    error "frontmost is " & frontApp & ", not KakaoTalk"
+  end if
   keystroke "v" using {command down}
   delay 0.15
   key code 36
@@ -52,6 +55,12 @@ export async function sendKakaoMessage(text: string): Promise<SendResult> {
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("not KakaoTalk")) {
+      return {
+        ok: false,
+        error: "카톡 앱이 frontmost 아님. 카톡 채팅창 열고 입력란 포커스한 뒤 재시도",
+      };
+    }
     return { ok: false, error: `AppleScript 실패: ${msg}` };
   }
 }
