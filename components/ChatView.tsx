@@ -70,10 +70,11 @@ function toPlainText(messages: Message[]): string {
     a.timestamp.localeCompare(b.timestamp),
   );
   return sorted
-    .filter((m) => m.text?.trim())
+    .filter((m) => m.text?.trim() || m.type === "photo")
     .map((m) => {
       const who = m.is_from_me ? "나" : `상대(${m.sender_id.slice(-4)})`;
-      return `[${formatTimestamp(m.timestamp)}] ${who}: ${m.text}`;
+      const text = m.type === "photo" ? `[사진: ${toPhotoFilename(m.timestamp)}]` : m.text;
+      return `[${formatTimestamp(m.timestamp)}] ${who}: ${text}`;
     })
     .join("\n");
 }

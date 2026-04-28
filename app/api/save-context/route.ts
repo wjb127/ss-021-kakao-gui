@@ -17,12 +17,21 @@ function formatTimestamp(iso: string): string {
   }
 }
 
+function toPhotoFilename(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `photo_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.jpg`;
+  } catch { return "photo.jpg"; }
+}
+
 function messagesToText(messages: Message[]): string {
   return messages
-    .filter((m) => m.text?.trim() && m.type !== "system")
+    .filter((m) => m.type !== "system" && (m.text?.trim() || m.type === "photo"))
     .map((m) => {
       const who = m.is_from_me ? "나" : `상대(${m.sender_id.slice(-4)})`;
-      return `[${formatTimestamp(m.timestamp)}] ${who}: ${m.text}`;
+      const text = m.type === "photo" ? `[사진: ${toPhotoFilename(m.timestamp)}]` : m.text;
+      return `[${formatTimestamp(m.timestamp)}] ${who}: ${text}`;
     })
     .join("\n");
 }
