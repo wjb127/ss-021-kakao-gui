@@ -176,6 +176,134 @@ export function getProjectPath(chatId: string): string | null {
   return paths[0] ?? null;
 }
 
+// ─── last_seen (폴링 워커용) ─────────────────────────────────────────────────
+
+export function getLastSeen(chatId: string): string | null {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT timestamp FROM last_seen WHERE chat_id = ?")
+    .get(chatId) as { timestamp: string } | undefined;
+  return row?.timestamp ?? null;
+}
+
+export function setLastSeen(chatId: string, timestamp: string): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT OR REPLACE INTO last_seen (chat_id, timestamp) VALUES (?, ?)",
+  ).run(chatId, timestamp);
+}
+
+export function getAllLastSeen(): Record<string, string> {
+  const db = getDb();
+  const rows = db
+    .prepare("SELECT chat_id, timestamp FROM last_seen")
+    .all() as { chat_id: string; timestamp: string }[];
+  return Object.fromEntries(rows.map((r) => [r.chat_id, r.timestamp]));
+}
+
+// ─── app_settings (key-value) ────────────────────────────────────────────────
+
+export function getSetting(key: string): string | null {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT value FROM app_settings WHERE key = ?")
+    .get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setSetting(key: string, value: string): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+  ).run(key, value);
+}
+
+// ─── claude_runs ─────────────────────────────────────────────────────────────
+
+export type RunStatus = "running" | "success" | "error";
+
+export interface ClaudeRun {
+  id: string;
+  chat_id: string;
+  project_path: string;
+  prompt: string;
+  output: string;
+  status: RunStatus;
+  exit_code: number | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+interface ClaudeRunRow {
+  id: string;
+  chat_id: string;
+  project_path: string;
+  prompt: string;
+  output: string;
+  status: string;
+  exit_code: number | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+function rowToRun(r: ClaudeRunRow): ClaudeRun {
+  const status: RunStatus =
+    r.status === "running" || r.status === "success" || r.status === "error"
+      ? (r.status as RunStatus)
+      : "error";
+  return { ...r, status };
+}
+
+export function createClaudeRun(
+  chatId: string,
+  projectPath: string,
+  prompt: string,
+): string {
+  const db = getDb();
+  const id = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  db.prepare(
+    `INSERT INTO claude_runs (id, chat_id, project_path, prompt, status, started_at)
+     VALUES (?, ?, ?, ?, 'running', ?)`,
+  ).run(id, chatId, projectPath, prompt, new Date().toISOString());
+  return id;
+}
+
+export function appendClaudeRunOutput(id: string, chunk: string): void {
+  const db = getDb();
+  db.prepare(
+    "UPDATE claude_runs SET output = output || ? WHERE id = ?",
+  ).run(chunk, id);
+}
+
+export function finishClaudeRun(
+  id: string,
+  status: RunStatus,
+  exitCode: number | null,
+): void {
+  const db = getDb();
+  db.prepare(
+    "UPDATE claude_runs SET status = ?, exit_code = ?, finished_at = ? WHERE id = ?",
+  ).run(status, exitCode, new Date().toISOString(), id);
+}
+
+export function getClaudeRun(id: string): ClaudeRun | null {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT * FROM claude_runs WHERE id = ?")
+    .get(id) as ClaudeRunRow | undefined;
+  return row ? rowToRun(row) : null;
+}
+
+export function listClaudeRunsByChat(chatId: string, limit = 20): ClaudeRun[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      "SELECT * FROM claude_runs WHERE chat_id = ? ORDER BY started_at DESC LIMIT ?",
+    )
+    .all(chatId, limit) as ClaudeRunRow[];
+  return rows.map(rowToRun);
+}
+
 // ─── messages (캐시) ─────────────────────────────────────────────────────────
 
 function rowToMessage(row: MessageRow): Message {

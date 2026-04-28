@@ -33,6 +33,12 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# CS 출력물 (민감)
+/cs-inbox/
+
+# 카카오 컨텍스트 (외부 프로젝트로 export되지만 이 repo에 잘못 생성 시 차단)
+KAKAO_CONTEXT.md
+
 # vercel
 .vercel
 

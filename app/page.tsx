@@ -26,12 +26,27 @@ export default function Home() {
   const [defaultFilter, setDefaultFilter] = useState<"all" | "client" | "casual">("all");
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [restoreChatId, setRestoreChatId] = useState<string | null>(null);
+  const [mobileAIOpen, setMobileAIOpen] = useState(false);
 
   useEffect(() => {
     const dv = localStorage.getItem("defaultView") as View | null;
     const df = localStorage.getItem("defaultFilter") as "all" | "client" | "casual" | null;
     if (dv) { setDefaultView(dv); setView(dv); }
     if (df) { setDefaultFilter(df); setFilter(df); }
+  }, []);
+
+  // URL ?chat=xxx 처리 (ntfy 푸시 클릭 딥링크)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const chatParam = params.get("chat");
+    if (chatParam) {
+      setSelectedChatId(chatParam);
+      setView("inbox");
+      // 쿼리스트링 제거 (뒤로가기 시 누적 방지)
+      const url = new URL(window.location.href);
+      url.searchParams.delete("chat");
+      window.history.replaceState({}, "", url.toString());
+    }
   }, []);
 
   const chatsRef = useRef<Chat[]>([]);
@@ -52,7 +67,6 @@ export default function Home() {
     const chat = chatsRef.current.find((c) => c.id === chatId);
     const memberCount = chat?.member_count ?? 0;
     setMessagesLoading(true);
-    // manual chat은 캐시에서만 읽음
     const url = chatId.startsWith("manual_")
       ? `/api/messages?chatId=${chatId}&memberCount=0&manualOnly=true`
       : `/api/messages?chatId=${chatId}&memberCount=${memberCount}`;
@@ -71,6 +85,13 @@ export default function Home() {
   const handleSelect = useCallback((id: string) => {
     setSelectedChatId(id);
     setMessages([]);
+    setMobileAIOpen(false);
+  }, []);
+
+  const handleBack = useCallback(() => {
+    setSelectedChatId(null);
+    setMessages([]);
+    setMobileAIOpen(false);
   }, []);
 
   const handleRefreshMessages = useCallback(() => {
@@ -174,10 +195,20 @@ export default function Home() {
   }
 
   // ── 인박스 뷰 ──────────────────────────────────────────────
+  // 모바일: list/chat 한 번에 하나만, AI는 풀스크린 오버레이
+  // 데스크톱(md+): 3패널 가로 배치
+  const showListMobile = !selectedChatId;
+  const showChatMobile = !!selectedChatId;
+
   return (
     <>
       <div className="flex h-screen bg-[#D6D8DF] text-[#1A1F36] overflow-hidden">
-        <div className={`${sidebarCollapsed ? "w-10" : "w-64"} shrink-0 h-full transition-all duration-200`}>
+        {/* ChatList */}
+        <div
+          className={`${showListMobile ? "flex" : "hidden"} md:flex w-full ${
+            sidebarCollapsed ? "md:w-10" : "md:w-64"
+          } md:shrink-0 h-full transition-all duration-200`}
+        >
           <ChatList
             chats={chats}
             selectedChatId={selectedChatId}
@@ -195,17 +226,32 @@ export default function Home() {
             onDeleteChat={handleDeleteChat}
           />
         </div>
-        <div className="flex-1 h-full min-w-0">
+
+        {/* ChatView */}
+        <div
+          className={`${showChatMobile ? "flex" : "hidden"} md:flex flex-1 h-full min-w-0`}
+        >
           <ChatView
             chat={selectedChat}
             messages={messages}
             loading={messagesLoading}
             onRefresh={handleRefreshMessages}
             onRestore={selectedChat ? () => setRestoreChatId(selectedChat.id) : undefined}
+            onBack={handleBack}
+            onOpenAI={() => setMobileAIOpen(true)}
           />
         </div>
-        <div className="w-72 shrink-0 h-full">
-          <AIPanel chat={selectedChat} />
+
+        {/* AIPanel: 데스크톱에선 우측 고정, 모바일에선 오버레이 */}
+        <div
+          className={`${
+            mobileAIOpen ? "fixed inset-0 z-40 flex" : "hidden"
+          } md:relative md:inset-auto md:z-auto md:flex md:w-72 md:shrink-0 h-full bg-white`}
+        >
+          <AIPanel
+            chat={selectedChat}
+            onCloseMobile={() => setMobileAIOpen(false)}
+          />
         </div>
       </div>
 

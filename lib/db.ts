@@ -66,6 +66,34 @@ export function getDb(): Database.Database {
       project_path TEXT NOT NULL,
       UNIQUE(chat_id, project_path)
     );
+
+    -- 폴링 워커가 마지막으로 본 메시지 timestamp 추적 (chat_id별)
+    CREATE TABLE IF NOT EXISTS last_seen (
+      chat_id   TEXT PRIMARY KEY,
+      timestamp TEXT NOT NULL
+    );
+
+    -- 앱 전역 설정 (ntfy 토픽, 활성화 여부 등)
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    -- Claude Code 원격 실행 기록
+    CREATE TABLE IF NOT EXISTS claude_runs (
+      id           TEXT PRIMARY KEY,
+      chat_id      TEXT NOT NULL,
+      project_path TEXT NOT NULL,
+      prompt       TEXT NOT NULL,
+      output       TEXT NOT NULL DEFAULT '',
+      status       TEXT NOT NULL,           -- running | success | error
+      exit_code    INTEGER,
+      started_at   TEXT NOT NULL,
+      finished_at  TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_claude_runs_chat
+      ON claude_runs(chat_id, started_at DESC);
   `);
 
   return _db;

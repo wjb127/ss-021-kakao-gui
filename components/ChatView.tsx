@@ -10,6 +10,8 @@ interface Props {
   loading: boolean;
   onRefresh: () => void;
   onRestore?: () => void;
+  onBack?: () => void;
+  onOpenAI?: () => void;
 }
 
 function dateKey(iso: string): string {
@@ -80,7 +82,7 @@ function toPlainText(messages: Message[]): string {
     .join("\n");
 }
 
-export function ChatView({ chat, messages, loading, onRefresh, onRestore }: Props) {
+export function ChatView({ chat, messages, loading, onRefresh, onRestore, onBack, onOpenAI }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [rawMode, setRawMode] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -119,17 +121,42 @@ export function ChatView({ chat, messages, loading, onRefresh, onRestore }: Prop
     <div className="flex flex-col h-full bg-[#F5F6F8]">
       {/* 헤더: 흰 배경, 하단 보더 */}
       <div className="px-4 py-3 border-b border-[#D6D8DF] bg-white flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-[#1A1F36] truncate">
-            {(!chat.display_name || chat.display_name === "(unknown)")
-            ? `(멤버 ${chat.member_count}명)`
-            : chat.display_name}
-          </div>
-          <div className="text-[11px] text-[#6B7280]">
-            멤버 {chat.member_count}명 · 메시지 {sorted.length}개 ({chat.member_count <= 10 ? "50일" : "10일"})
+        <div className="min-w-0 flex items-start gap-2">
+          {/* 모바일 뒤로가기 */}
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="md:hidden text-[#6B7280] hover:text-[#1A1F36] transition-colors mt-0.5"
+              title="뒤로"
+              aria-label="뒤로가기"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-[#1A1F36] truncate">
+              {(!chat.display_name || chat.display_name === "(unknown)")
+              ? `(멤버 ${chat.member_count}명)`
+              : chat.display_name}
+            </div>
+            <div className="text-[11px] text-[#6B7280]">
+              멤버 {chat.member_count}명 · 메시지 {sorted.length}개 ({chat.member_count <= 10 ? "50일" : "10일"})
+            </div>
           </div>
         </div>
         <div className="flex gap-1.5 shrink-0">
+          {/* 모바일 AI 패널 열기 */}
+          {onOpenAI && (
+            <button
+              onClick={onOpenAI}
+              className="md:hidden text-[11px] px-2 py-1 rounded bg-[#2959AA] text-white hover:bg-[#1F4485] transition-colors"
+              title="AI 패널"
+            >
+              AI
+            </button>
+          )}
           {/* 새로고침 버튼 */}
           <button
             onClick={onRefresh}
