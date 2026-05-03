@@ -6,24 +6,25 @@ import { ChatList } from "@/components/ChatList";
 import { ChatView } from "@/components/ChatView";
 import { AIPanel } from "@/components/AIPanel";
 import { BoardView } from "@/components/BoardView";
+import { CardView } from "@/components/CardView";
 import { SettingsModal } from "@/components/SettingsModal";
 import { NewChatModal } from "@/components/NewChatModal";
 import { RestoreModal } from "@/components/RestoreModal";
 
-type View = "inbox" | "board";
+type View = "inbox" | "board" | "card";
 
 export default function Home() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
-  const [filter, setFilter] = useState<"all" | "client" | "casual">("all");
+  const [filter, setFilter] = useState<"all" | "client" | "casual">("client");
   const [chatsLoading, setChatsLoading] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [view, setView] = useState<View>("inbox");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [defaultView, setDefaultView] = useState<View>("inbox");
-  const [defaultFilter, setDefaultFilter] = useState<"all" | "client" | "casual">("all");
+  const [defaultFilter, setDefaultFilter] = useState<"all" | "client" | "casual">("client");
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [restoreChatId, setRestoreChatId] = useState<string | null>(null);
   const [mobileAIOpen, setMobileAIOpen] = useState(false);
@@ -83,8 +84,12 @@ export default function Home() {
   }, [selectedChatId, loadMessages]);
 
   const handleSelect = useCallback((id: string) => {
-    setSelectedChatId(id);
-    setMessages([]);
+    setSelectedChatId((prev) => {
+      // 같은 채팅 재클릭 시 메시지 초기화하지 않음 (선택 유지)
+      if (prev === id) return prev;
+      setMessages([]);
+      return id;
+    });
     setMobileAIOpen(false);
   }, []);
 
@@ -168,7 +173,7 @@ export default function Home() {
   const selectedChat = chats.find((c) => c.id === selectedChatId) ?? null;
   const restoreChat = chats.find((c) => c.id === restoreChatId) ?? null;
 
-  // ── 보드 뷰 ────────────────────────────────────────────────
+  // ── 보드 뷰 (가로 스크롤) ──────────────────────────────────
   if (view === "board") {
     return (
       <>
@@ -178,7 +183,40 @@ export default function Home() {
           onFilterChange={setFilter}
           onCategoryChange={handleCategoryChange}
           onSwitchToInbox={switchToInbox}
+          onSwitchToCard={() => setView("card")}
           onOpenSettings={() => setSettingsOpen(true)}
+          onNewChat={() => {
+            setView("inbox");
+            setNewChatOpen(true);
+          }}
+          refreshing={chatsLoading}
+          onRefresh={loadChats}
+        />
+        <SettingsModal
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          defaultView={defaultView}
+          onDefaultViewChange={handleDefaultViewChange}
+          defaultFilter={defaultFilter}
+          onDefaultFilterChange={handleDefaultFilterChange}
+        />
+      </>
+    );
+  }
+
+  // ── 카드 뷰 (세로 그리드) ──────────────────────────────────
+  if (view === "card") {
+    return (
+      <>
+        <CardView
+          chats={chats}
+          onSwitchToInbox={switchToInbox}
+          onSwitchToBoard={() => setView("board")}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onNewChat={() => {
+            setView("inbox");
+            setNewChatOpen(true);
+          }}
           refreshing={chatsLoading}
           onRefresh={loadChats}
         />
@@ -221,6 +259,7 @@ export default function Home() {
             collapsed={sidebarCollapsed}
             onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
             onSwitchToBoard={() => setView("board")}
+            onSwitchToCard={() => setView("card")}
             onOpenSettings={() => setSettingsOpen(true)}
             onNewChat={() => setNewChatOpen(true)}
             onDeleteChat={handleDeleteChat}

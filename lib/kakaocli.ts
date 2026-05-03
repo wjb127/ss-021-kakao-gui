@@ -1,7 +1,9 @@
 // kakaocli 외부 명령 실행 래퍼
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Chat, Message } from "./types";
+import { existsSync } from "node:fs";
+import type { Chat, Message, MessageAttachment } from "./types";
+import { getDownloadsForChat } from "./store";
 
 const execFileAsync = promisify(execFile);
 
@@ -64,6 +66,47 @@ export async function listChats(limit = 200): Promise<Chat[]> {
   }
 }
 
+interface MediaMeta {
+  attachment?: MessageAttachment;
+  localFilePath?: string;
+}
+
+// kakao DB 에서 사진/동영상/파일 메시지의 attachment + localFilePath 조회
+// chatId 는 숫자 문자열 (SQL injection 방지용 숫자 검증)
+async function fetchMediaMeta(chatId: string): Promise<Map<string, MediaMeta>> {
+  if (!/^\d+$/.test(chatId)) return new Map();
+  const sql = `SELECT logId, attachment, localFilePath FROM NTChatMessage WHERE chatId=${chatId} AND type IN (2,3,18) AND (attachment IS NOT NULL OR (localFilePath IS NOT NULL AND localFilePath != ''))`;
+  try {
+    const { stdout } = await execFileAsync(
+      KAKAOCLI_BIN,
+      ["query", sql, "--db", DB, "--key", KEY],
+      { maxBuffer: 50 * 1024 * 1024 },
+    );
+    const rows = parseSafeJson(stdout) as Array<
+      [string | number, string | null, string | null]
+    >;
+    const map = new Map<string, MediaMeta>();
+    for (const [logId, att, lfp] of rows) {
+      let attachment: MessageAttachment | undefined;
+      if (att) {
+        try {
+          attachment = JSON.parse(att) as MessageAttachment;
+        } catch {
+          attachment = undefined;
+        }
+      }
+      map.set(String(logId), {
+        attachment,
+        localFilePath: lfp || undefined,
+      });
+    }
+    return map;
+  } catch (err) {
+    console.error("fetchMediaMeta 실패:", err);
+    return new Map();
+  }
+}
+
 export async function listMessages(
   chatId: string,
   since = "10d",
@@ -101,15 +144,37 @@ export async function listMessages(
       timestamp: string;
       type: string;
     }>;
-    return data.map((m) => ({
-      id: String(m.id),
-      chat_id: String(m.chat_id),
-      sender_id: String(m.sender_id),
-      text: m.text ?? "",
-      is_from_me: m.is_from_me,
-      timestamp: m.timestamp,
-      type: m.type,
-    }));
+    // 미디어 메시지가 있을 때만 추가 쿼리 (불필요한 SQL 절약)
+    const hasMedia = data.some(
+      (m) => m.type === "photo" || m.type === "video" || m.type === "file",
+    );
+    const mediaMap = hasMedia ? await fetchMediaMeta(chatId) : new Map();
+    // 인박스 자체 다운로드 경로 (downloads 테이블) — 카톡 앱 path 보다 우선
+    const inboxDownloads = new Map<string, string>();
+    if (hasMedia) {
+      for (const d of getDownloadsForChat(chatId)) {
+        if (existsSync(d.filePath)) inboxDownloads.set(d.messageId, d.filePath);
+      }
+    }
+    return data.map((m) => {
+      const meta = mediaMap.get(String(m.id));
+      const inboxPath = inboxDownloads.get(String(m.id));
+      const kakaoPath =
+        meta?.localFilePath && existsSync(meta.localFilePath)
+          ? meta.localFilePath
+          : undefined;
+      return {
+        id: String(m.id),
+        chat_id: String(m.chat_id),
+        sender_id: String(m.sender_id),
+        text: m.text ?? "",
+        is_from_me: m.is_from_me,
+        timestamp: m.timestamp,
+        type: m.type,
+        localFilePath: inboxPath ?? kakaoPath,
+        attachment: meta?.attachment,
+      };
+    });
   } catch (err) {
     console.error("kakaocli messages 실패:", err);
     return [];

@@ -11,6 +11,18 @@ export interface Chat {
   category: Category | null;
 }
 
+export interface MessageAttachment {
+  url?: string;
+  thumbnailUrl?: string;
+  w?: number;
+  h?: number;
+  thumbnailWidth?: number;
+  thumbnailHeight?: number;
+  s?: number;
+  mt?: string;
+  name?: string;
+}
+
 export interface Message {
   id: string;
   chat_id: string;
@@ -19,6 +31,10 @@ export interface Message {
   is_from_me: boolean;
   timestamp: string;
   type: string;
+  // 카톡 앱에서 다운받은 로컬 파일 경로 (사진/동영상/파일에만 있음)
+  localFilePath?: string;
+  // 첨부 메타데이터 (썸네일/원본 URL 등). manual 채팅엔 없음
+  attachment?: MessageAttachment;
 }
 
 export type Urgency = "Low" | "Medium" | "High" | "Critical";

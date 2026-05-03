@@ -25,7 +25,8 @@ export function NewChatModal({ open, onClose, onCreate }: Props) {
   }, [open, onClose]);
 
   async function handleCreate() {
-    if (!name.trim()) return;
+    // 중복 실행 방지: IME 조합 중 Enter 더블파이어 + 빠른 더블클릭 차단
+    if (!name.trim() || loading) return;
     setLoading(true);
     try {
       const res = await fetch("/api/manual-chat", {
@@ -54,7 +55,10 @@ export function NewChatModal({ open, onClose, onCreate }: Props) {
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); }}
+          onKeyDown={(e) => {
+            // 한글 IME 조합 중 Enter 무시 (composition 종료 + Enter 더블파이어 방지)
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) handleCreate();
+          }}
           placeholder="예: 크몽_홍길동"
           className="w-full text-sm px-3 py-2 border border-[#D6D8DF] rounded bg-[#F5F6F8] text-[#1A1F36] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2959AA] mb-3"
         />

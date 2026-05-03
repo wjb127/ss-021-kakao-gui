@@ -3,6 +3,7 @@
 // 보드 뷰 — 가로 스크롤 카드 레이아웃
 import { useEffect, useRef, useState } from "react";
 import type { Category, Chat } from "@/lib/types";
+import { ViewSwitcher } from "./ViewSwitcher";
 
 interface Props {
   chats: Chat[];
@@ -10,7 +11,9 @@ interface Props {
   onFilterChange: (f: "all" | "client" | "casual") => void;
   onCategoryChange: (chatId: string, category: Category | null) => void;
   onSwitchToInbox: (chatId?: string) => void;
+  onSwitchToCard: () => void;
   onOpenSettings: () => void;
+  onNewChat: () => void;
   refreshing: boolean;
   onRefresh: () => void;
 }
@@ -38,13 +41,15 @@ function formatTime(iso: string): string {
   } catch { return ""; }
 }
 
-// 카드별 메모 관리
-function MemoCard({
+// 카드별 메모 관리 (보드/카드 뷰 공용)
+export function MemoCard({
   chat,
   onOpenInbox,
+  variant = "horizontal",
 }: {
   chat: Chat;
   onOpenInbox: () => void;
+  variant?: "horizontal" | "grid";
 }) {
   const [memo, setMemo] = useState("");
   const [saved, setSaved] = useState(false);
@@ -77,7 +82,12 @@ function MemoCard({
     : chat.display_name;
 
   return (
-    <div className="flex flex-col w-56 shrink-0 bg-white border border-[#D6D8DF] rounded-lg overflow-hidden shadow-sm" style={{ height: "calc(100vh - 56px - 2rem)" }}>
+    <div
+      className={`flex flex-col bg-white border border-[#D6D8DF] rounded-lg overflow-hidden shadow-sm ${
+        variant === "horizontal" ? "w-56 shrink-0" : "w-full h-72"
+      }`}
+      style={variant === "horizontal" ? { height: "calc(100vh - 56px - 2rem)" } : undefined}
+    >
       {/* 카드 헤더 */}
       <div className="px-3 pt-3 pb-2 border-b border-[#E8E9EC]">
         <button
@@ -129,73 +139,76 @@ export function BoardView({
   filter,
   onFilterChange,
   onSwitchToInbox,
+  onSwitchToCard,
   onOpenSettings,
+  onNewChat,
   refreshing,
   onRefresh,
 }: Props) {
+  // 보드 뷰는 고객 카테고리만 강제
   const filtered = [...chats]
-    .filter((c) => filter === "all" || c.category === filter)
+    .filter((c) => c.category === "client")
     .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at));
 
   return (
     <div className="flex flex-col h-screen bg-[#F5F6F8] overflow-hidden">
-      {/* 상단 바 */}
-      <div className="px-4 py-3 bg-white border-b border-[#D6D8DF] flex items-center gap-3 shrink-0">
-        <span className="text-sm font-bold text-[#1A1F36]">카카오 인박스</span>
+      {/* 상단 바 — ChatList 헤더와 동일 아이콘/순서 */}
+      <div className="px-3 py-3 bg-white border-b border-[#D6D8DF] flex items-center gap-2 md:gap-3 shrink-0">
+        <span className="text-base md:text-sm font-bold text-[#1A1F36] shrink-0">카카오톡 인박스</span>
 
-        {/* 필터 */}
-        <div className="flex gap-1 text-xs">
-          {(["all", "client", "casual"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => onFilterChange(f)}
-              className={`px-2.5 py-1 rounded transition-colors ${
-                filter === f
-                  ? "bg-[#2959AA] text-white"
-                  : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
-              }`}
-            >
-              {f === "all" ? "전체" : f === "client" ? "고객" : "잡담"}
-            </button>
-          ))}
-        </div>
+        {/* 보드 뷰 = 고객 전용 표시 */}
+        <span className="text-sm md:text-xs px-2.5 py-1 rounded bg-[#2959AA] text-white">고객</span>
 
-        <span className="text-[10px] text-[#9CA3AF]">{filtered.length}개</span>
+        <span className="hidden md:inline text-[10px] text-[#9CA3AF]">{filtered.length}개</span>
 
-        <div className="ml-auto flex items-center gap-2">
-          {/* 새로고침 */}
+        <div className="ml-auto flex items-center gap-0.5 md:gap-1.5">
+          {/* 1. 새 대화 추가 */}
+          <button
+            onClick={onNewChat}
+            className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
+            title="새 대화 추가"
+            aria-label="새 대화 추가"
+          >
+            <svg className="w-6 h-6 md:w-4 md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+          {/* 2. 뷰 전환 드롭다운 */}
+          <ViewSwitcher
+            current="board"
+            onChange={(v) => {
+              if (v === "inbox") onSwitchToInbox();
+              else if (v === "card") onSwitchToCard();
+            }}
+          />
+          {/* 3. 새로고침 */}
           <button
             onClick={onRefresh}
             disabled={refreshing}
-            className="text-[#6B7280] hover:text-[#1A1F36] disabled:text-[#9CA3AF] transition-colors"
+            className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] disabled:text-[#9CA3AF] transition-colors"
             title="새로고침"
+            aria-label="새로고침"
           >
             <svg
-              className={`w-4 h-4 ${refreshing ? "animate-spin text-[#2959AA]" : ""}`}
+              className={`w-6 h-6 md:w-4 md:h-4 ${refreshing ? "animate-spin text-[#2959AA]" : ""}`}
               fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
             >
               <path strokeLinecap="round" strokeLinejoin="round"
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
           </button>
-          {/* 설정 */}
+          {/* 4. 설정 */}
           <button
             onClick={onOpenSettings}
-            className="text-[#6B7280] hover:text-[#1A1F36] transition-colors"
+            className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
             title="설정"
+            aria-label="설정"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-6 h-6 md:w-4 md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round"
                 d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-          </button>
-          {/* 인박스 뷰 전환 */}
-          <button
-            onClick={() => onSwitchToInbox()}
-            className="text-[10px] px-2.5 py-1 bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36] rounded transition-colors"
-          >
-            인박스 뷰
           </button>
         </div>
       </div>

@@ -2,7 +2,7 @@
 // instrumentation.ts에서 시작됨
 
 import { listChats, listMessages } from "./kakaocli";
-import { getLastSeen, setLastSeen, upsertMessages, getSetting } from "./store";
+import { getLastSeen, setLastSeen, upsertMessages, getSetting, getCategories } from "./store";
 import { sendPush } from "./telegram";
 
 const DEFAULT_POLL_SEC = 30;
@@ -61,12 +61,16 @@ async function tick(state: { running: boolean }): Promise<void> {
     const chats = await listChats(50);
     if (chats.length === 0) return;
 
+    // 카테고리 매핑 로드
+    const categories = await getCategories();
+
     // 최근 활동 채팅 상위 10개만 검사 (kakaocli 부하 줄이기)
     const recent = [...chats]
       .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at))
       .slice(0, 10);
 
     for (const chat of recent) {
+      const category = categories[chat.id] ?? null;
       const lastSeen = getLastSeen(chat.id);
 
       // 첫 폴링: 알림 없이 baseline만 기록
@@ -97,6 +101,9 @@ async function tick(state: { running: boolean }): Promise<void> {
       setLastSeen(chat.id, latest);
 
       if (newOnes.length === 0) continue;
+
+      // 고객 카테고리만 푸시 (그 외는 baseline만 갱신, 알림 스킵)
+      if (category !== "client") continue;
 
       // 푸시: 마지막 메시지 1개만 (대량 알림 방지)
       const last = newOnes[newOnes.length - 1];

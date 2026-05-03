@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import OpenAI from "openai";
 import { listMessages } from "@/lib/kakaocli";
-import { setTodoForChat } from "@/lib/store";
+import { setTodoForChat, getCachedMessages } from "@/lib/store";
 import type { Analysis, Message, Urgency } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +51,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const all = await listMessages(body.chatId, "10d", 1000);
+    // manual_* 는 kakao DB 에 없음 → SQLite messages 캐시에서 직접 로드
+    const all = body.chatId.startsWith("manual_")
+      ? getCachedMessages(body.chatId)
+      : await listMessages(body.chatId, "10d", 1000);
     const real = filterRealText(all);
 
     if (real.length === 0) {

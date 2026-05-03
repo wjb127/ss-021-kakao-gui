@@ -6,8 +6,8 @@ import { useEffect, useRef, useState } from "react";
 interface Props {
   open: boolean;
   onClose: () => void;
-  defaultView: "inbox" | "board";
-  onDefaultViewChange: (v: "inbox" | "board") => void;
+  defaultView: "inbox" | "board" | "card";
+  onDefaultViewChange: (v: "inbox" | "board" | "card") => void;
   defaultFilter: "all" | "client" | "casual";
   onDefaultFilterChange: (f: "all" | "client" | "casual") => void;
 }
@@ -143,7 +143,7 @@ export function SettingsModal({
           <div>
             <div className="text-xs font-medium text-[#1A1F36] mb-1.5">기본 뷰</div>
             <div className="flex gap-1.5">
-              {(["inbox", "board"] as const).map((v) => (
+              {(["inbox", "card", "board"] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => onDefaultViewChange(v)}
@@ -153,7 +153,7 @@ export function SettingsModal({
                       : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
                   }`}
                 >
-                  {v === "inbox" ? "인박스" : "보드"}
+                  {v === "inbox" ? "인박스" : v === "card" ? "카드" : "보드"}
                 </button>
               ))}
             </div>

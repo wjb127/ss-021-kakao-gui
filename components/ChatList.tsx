@@ -3,6 +3,7 @@
 // 채팅 목록 사이드바
 import { useMemo, useEffect, useRef, useState } from "react";
 import type { Category, Chat } from "@/lib/types";
+import { ViewSwitcher } from "./ViewSwitcher";
 
 interface Props {
   chats: Chat[];
@@ -16,6 +17,7 @@ interface Props {
   collapsed: boolean;
   onToggleCollapse: () => void;
   onSwitchToBoard: () => void;
+  onSwitchToCard: () => void;
   onOpenSettings: () => void;
   onNewChat: () => void;
   onDeleteChat: (chatId: string) => void;
@@ -44,12 +46,22 @@ const OPTIONS: { value: Category | null; label: string; style: string }[] = [
 function CategoryDropdown({
   category,
   onSelect,
+  onOpenChange,
 }: {
   category: Category | null;
   onSelect: (c: Category | null) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  function setOpen(v: boolean | ((p: boolean) => boolean)) {
+    setOpenState((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      onOpenChange?.(next);
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -60,6 +72,7 @@ function CategoryDropdown({
     }
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   return (
@@ -127,6 +140,152 @@ const CATEGORY_DOT: Record<Category, string> = {
   bot:    "bg-[#6B7280]",
 };
 
+// 채팅 행 — 모바일 좌측 스와이프 시 빨간 삭제 버튼 노출 (manual_* 전용)
+function ChatRow({
+  chat,
+  isSelected,
+  onSelect,
+  onCategoryChange,
+  onDeleteChat,
+}: {
+  chat: Chat;
+  isSelected: boolean;
+  onSelect: (id: string) => void;
+  onCategoryChange: (chatId: string, category: Category | null) => void;
+  onDeleteChat: (chatId: string) => void;
+}) {
+  const isManual = chat.id.startsWith("manual_");
+  const [offset, setOffset] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [catOpen, setCatOpen] = useState(false); // 카테고리 드롭다운 열림 상태 (z-index 보정용)
+  const startX = useRef(0);
+  const startY = useRef(0);
+  const horizontal = useRef(false);
+  const REVEAL = 80;
+
+  function handleTouchStart(e: React.TouchEvent) {
+    if (!isManual) return;
+    startX.current = e.touches[0].clientX;
+    startY.current = e.touches[0].clientY;
+    horizontal.current = false;
+    setDragging(true);
+  }
+
+  function handleTouchMove(e: React.TouchEvent) {
+    if (!isManual || !dragging) return;
+    const dx = e.touches[0].clientX - startX.current;
+    const dy = e.touches[0].clientY - startY.current;
+    // 첫 이동에서 가로 의도 판단 (세로 스크롤 방해 방지)
+    if (!horizontal.current) {
+      if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy)) {
+        horizontal.current = true;
+      } else if (Math.abs(dy) > 6) {
+        setDragging(false);
+        return;
+      } else {
+        return;
+      }
+    }
+    // 이미 열린 상태에서 추가 좌측 드래그/우측 닫기 보정
+    const base = offset;
+    const next = Math.max(-REVEAL, Math.min(0, base + dx));
+    setOffset(next);
+  }
+
+  function handleTouchEnd() {
+    if (!isManual) return;
+    setDragging(false);
+    if (!horizontal.current) return;
+    setOffset((prev) => (prev < -REVEAL / 2 ? -REVEAL : 0));
+  }
+
+  // manual 전용 파스텔 배경 (peach 계열)
+  const manualBg = isSelected
+    ? "bg-[#FFE3C2] border-l-2 border-l-[#F59E0B]"
+    : "bg-[#FFF4E5] hover:bg-[#FCE7C8]";
+  const normalBg = isSelected
+    ? "bg-[#E8ECF5] border-l-2 border-l-[#2959AA]"
+    : "hover:bg-[#E0E2E8]";
+
+  return (
+    <div className={`relative border-b border-[#C8CAD1] ${catOpen ? "z-30" : ""}`}>
+      {/* 좌측 스와이프 시 노출되는 삭제 버튼 (manual_* 전용) */}
+      {isManual && (
+        <button
+          onClick={() => {
+            onDeleteChat(chat.id);
+            setOffset(0);
+          }}
+          className="absolute right-0 top-0 bottom-0 w-20 bg-red-500 hover:bg-red-600 text-white text-xs font-medium flex items-center justify-center"
+          style={{ opacity: offset < -8 ? 1 : 0, pointerEvents: offset < -8 ? "auto" : "none" }}
+          aria-label="대화 삭제"
+        >
+          삭제
+        </button>
+      )}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => {
+          // 열려있으면 클릭으로 닫기 우선
+          if (offset < 0) {
+            setOffset(0);
+            return;
+          }
+          onSelect(chat.id);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onSelect(chat.id);
+          }
+        }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{
+          transform: `translateX(${offset}px)`,
+          transition: dragging ? "none" : "transform 0.2s",
+        }}
+        className={`relative w-full text-left px-3 py-2 cursor-pointer min-w-0 ${
+          isManual ? manualBg : normalBg
+        }`}
+      >
+        <div className="flex items-center gap-2 mb-1 min-w-0">
+          <CategoryDropdown
+            category={chat.category}
+            onSelect={(cat) => onCategoryChange(chat.id, cat)}
+            onOpenChange={setCatOpen}
+          />
+          <span className="text-sm text-[#1A1F36] truncate flex-1 min-w-0">
+            {(!chat.display_name || chat.display_name === "(unknown)")
+              ? `(멤버 ${chat.member_count}명)`
+              : chat.display_name}
+          </span>
+          {chat.unread_count > 0 && (
+            <span className="text-[10px] bg-red-500 text-white rounded-full px-1.5 py-0.5 shrink-0">
+              {chat.unread_count > 999 ? "999+" : chat.unread_count}
+            </span>
+          )}
+          {isManual && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onDeleteChat(chat.id); }}
+              className="hidden md:inline text-[10px] text-[#9CA3AF] hover:text-red-500 transition-colors shrink-0"
+              title="대화 삭제"
+            >
+              ×
+            </button>
+          )}
+        </div>
+        <div className="flex items-center justify-between text-[10px] text-[#6B7280]">
+          <span>👥 {chat.member_count}</span>
+          <span>{formatTime(chat.last_message_at)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ChatList({
   chats,
   selectedChatId,
@@ -139,6 +298,7 @@ export function ChatList({
   collapsed,
   onToggleCollapse,
   onSwitchToBoard,
+  onSwitchToCard,
   onOpenSettings,
   onNewChat,
   onDeleteChat,
@@ -170,14 +330,16 @@ export function ChatList({
         <div className="flex-1 overflow-y-auto w-full">
           {filtered.map((c) => {
             const isSelected = selectedChatId === c.id;
+            const isManual = c.id.startsWith("manual_");
+            const cls = isManual
+              ? isSelected ? "bg-[#FFE3C2]" : "bg-[#FFF4E5] hover:bg-[#FCE7C8]"
+              : isSelected ? "bg-[#E8ECF5]" : "hover:bg-[#C8CAD1]";
             return (
               <button
                 key={c.id}
                 onClick={() => onSelect(c.id)}
                 title={c.display_name || `멤버 ${c.member_count}명`}
-                className={`w-full py-2 flex justify-center relative transition-colors ${
-                  isSelected ? "bg-[#E8ECF5]" : "hover:bg-[#C8CAD1]"
-                }`}
+                className={`w-full py-2 flex justify-center relative transition-colors ${cls}`}
               >
                 {/* 카테고리 점 */}
                 <span className={`w-2.5 h-2.5 rounded-full ${
@@ -203,73 +365,76 @@ export function ChatList({
       {/* 헤더 영역: 30% 흰 패널 */}
       <div className="p-3 border-b border-[#D6D8DF] bg-white">
         <div className="flex items-center justify-between mb-2">
-          <h1 className="text-sm font-bold text-[#1A1F36]">카카오톡 인박스</h1>
-          <div className="flex items-center gap-1.5">
-            {/* 새 대화 추가 */}
+          <h1 className="text-base md:text-sm font-bold text-[#1A1F36]">카카오톡 인박스</h1>
+          <div className="flex items-center gap-0.5 md:gap-1.5">
+            {/* 1. 새 대화 추가 */}
             <button
               onClick={onNewChat}
-              className="text-[#6B7280] hover:text-[#1A1F36] transition-colors"
+              className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
               title="새 대화 추가"
+              aria-label="새 대화 추가"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-6 h-6 md:w-4 md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
               </svg>
             </button>
-            {/* 보드 뷰 전환 */}
-            <button
-              onClick={onSwitchToBoard}
-              className="text-[#6B7280] hover:text-[#1A1F36] transition-colors"
-              title="보드 뷰"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-              </svg>
-            </button>
-            {/* 설정 */}
-            <button
-              onClick={onOpenSettings}
-              className="text-[#6B7280] hover:text-[#1A1F36] transition-colors"
-              title="설정"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round"
-                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
-            {/* 접기 버튼 */}
-            <button
-              onClick={onToggleCollapse}
-              className="text-[#6B7280] hover:text-[#1A1F36] transition-colors"
-              title="목록 접기"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
+            {/* 2. 뷰 전환 드롭다운 */}
+            <ViewSwitcher
+              current="inbox"
+              onChange={(v) => {
+                if (v === "card") onSwitchToCard();
+                else if (v === "board") onSwitchToBoard();
+              }}
+            />
+            {/* 3. 새로고침 */}
             <button
               onClick={onRefresh}
               disabled={refreshing}
-              className="text-[#6B7280] hover:text-[#1A1F36] disabled:text-[#9CA3AF] transition-colors"
+              className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] disabled:text-[#9CA3AF] transition-colors"
               title="채팅 목록 새로고침"
+              aria-label="새로고침"
             >
               <svg
-                className={`w-4 h-4 ${refreshing ? "animate-spin text-[#2959AA]" : ""}`}
+                className={`w-6 h-6 md:w-4 md:h-4 ${refreshing ? "animate-spin text-[#2959AA]" : ""}`}
                 fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
               >
                 <path strokeLinecap="round" strokeLinejoin="round"
                   d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </button>
+            {/* 4. 설정 */}
+            <button
+              onClick={onOpenSettings}
+              className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
+              title="설정"
+              aria-label="설정"
+            >
+              <svg className="w-6 h-6 md:w-4 md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+            {/* 5. 접기 — 데스크탑 전용 보조 */}
+            <button
+              onClick={onToggleCollapse}
+              className="hidden md:inline-flex p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
+              title="목록 접기"
+              aria-label="목록 접기"
+            >
+              <svg className="w-6 h-6 md:w-4 md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
           </div>
         </div>
         {/* 필터 탭 */}
-        <div className="flex gap-1 text-xs">
+        <div className="flex gap-1 text-sm md:text-xs">
           {(["all", "client", "casual"] as const).map((f) => (
             <button
               key={f}
               onClick={() => onFilterChange(f)}
-              className={`flex-1 py-1 rounded transition-colors ${
+              className={`flex-1 py-2 md:py-1 rounded transition-colors ${
                 filter === f
                   ? "bg-[#2959AA] text-white"
                   : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
@@ -288,58 +453,16 @@ export function ChatList({
             채팅이 없습니다
           </div>
         ) : (
-          filtered.map((c) => {
-            const isSelected = selectedChatId === c.id;
-            return (
-              <div
-                key={c.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => onSelect(c.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onSelect(c.id);
-                  }
-                }}
-                className={`w-full text-left px-3 py-2 border-b border-[#C8CAD1] transition-colors cursor-pointer min-w-0 ${
-                  isSelected
-                    ? "bg-[#E8ECF5] border-l-2 border-l-[#2959AA]"
-                    : "hover:bg-[#E0E2E8]"
-                }`}
-              >
-                <div className="flex items-center gap-2 mb-1 min-w-0">
-                  <CategoryDropdown
-                    category={c.category}
-                    onSelect={(cat) => onCategoryChange(c.id, cat)}
-                  />
-                  <span className="text-sm text-[#1A1F36] truncate flex-1 min-w-0">
-                    {(!c.display_name || c.display_name === "(unknown)")
-                      ? `(멤버 ${c.member_count}명)`
-                      : c.display_name}
-                  </span>
-                  {c.unread_count > 0 && (
-                    <span className="text-[10px] bg-red-500 text-white rounded-full px-1.5 py-0.5 shrink-0">
-                      {c.unread_count > 999 ? "999+" : c.unread_count}
-                    </span>
-                  )}
-                  {c.id.startsWith("manual_") && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onDeleteChat(c.id); }}
-                      className="text-[10px] text-[#9CA3AF] hover:text-red-500 transition-colors shrink-0"
-                      title="대화 삭제"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center justify-between text-[10px] text-[#6B7280]">
-                  <span>👥 {c.member_count}</span>
-                  <span>{formatTime(c.last_message_at)}</span>
-                </div>
-              </div>
-            );
-          })
+          filtered.map((c) => (
+            <ChatRow
+              key={c.id}
+              chat={c}
+              isSelected={selectedChatId === c.id}
+              onSelect={onSelect}
+              onCategoryChange={onCategoryChange}
+              onDeleteChat={onDeleteChat}
+            />
+          ))
         )}
       </div>
     </div>

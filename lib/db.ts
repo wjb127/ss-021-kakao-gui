@@ -94,6 +94,19 @@ export function getDb(): Database.Database {
 
     CREATE INDEX IF NOT EXISTS idx_claude_runs_chat
       ON claude_runs(chat_id, started_at DESC);
+
+    -- 인박스 자체 다운로드 추적 (kakaocli DB 의 localFilePath 와 별개)
+    CREATE TABLE IF NOT EXISTS downloads (
+      message_id    TEXT PRIMARY KEY,
+      chat_id       TEXT NOT NULL,
+      file_path     TEXT NOT NULL,
+      url           TEXT NOT NULL,
+      size          INTEGER,
+      downloaded_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_downloads_chat
+      ON downloads(chat_id);
   `);
 
   return _db;

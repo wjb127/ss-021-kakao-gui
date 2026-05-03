@@ -328,6 +328,77 @@ export function getCachedMessages(chatId: string): Message[] {
   return rows.map(rowToMessage);
 }
 
+// 특정 채팅의 모든 메시지 삭제 (새로파싱 모드용)
+export function deleteMessagesForChat(chatId: string): void {
+  const db = getDb();
+  db.prepare("DELETE FROM messages WHERE chat_id = ?").run(chatId);
+}
+
+// ─── downloads (인박스 자체 다운로드 추적) ───────────────────────────────────
+
+export interface DownloadRecord {
+  messageId: string;
+  chatId: string;
+  filePath: string;
+  url: string;
+  size: number | null;
+  downloadedAt: string;
+}
+
+interface DownloadRow {
+  message_id: string;
+  chat_id: string;
+  file_path: string;
+  url: string;
+  size: number | null;
+  downloaded_at: string;
+}
+
+function rowToDownload(r: DownloadRow): DownloadRecord {
+  return {
+    messageId: r.message_id,
+    chatId: r.chat_id,
+    filePath: r.file_path,
+    url: r.url,
+    size: r.size,
+    downloadedAt: r.downloaded_at,
+  };
+}
+
+export function recordDownload(rec: Omit<DownloadRecord, "downloadedAt">): void {
+  const db = getDb();
+  db.prepare(
+    `INSERT OR REPLACE INTO downloads
+     (message_id, chat_id, file_path, url, size, downloaded_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    rec.messageId,
+    rec.chatId,
+    rec.filePath,
+    rec.url,
+    rec.size,
+    new Date().toISOString(),
+  );
+}
+
+export function getDownload(messageId: string): DownloadRecord | null {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT * FROM downloads WHERE message_id = ?")
+    .get(messageId) as DownloadRow | undefined;
+  return row ? rowToDownload(row) : null;
+}
+
+export function getDownloadsForChat(chatId: string): DownloadRecord[] {
+  const db = getDb();
+  const rows = db
+    .prepare("SELECT * FROM downloads WHERE chat_id = ?")
+    .all(chatId) as DownloadRow[];
+  return rows.map(rowToDownload);
+}
+
+// ─── messages (캐시 헬퍼) ────────────────────────────────────────────────────
+
 // INSERT OR IGNORE: 이미 있는 id는 건너뜀 (중복 방지)
 export function upsertMessages(messages: Message[]): void {
   if (messages.length === 0) return;
