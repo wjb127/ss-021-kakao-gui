@@ -39,6 +39,9 @@ yarn-error.log*
 # 카카오 컨텍스트 (외부 프로젝트로 export되지만 이 repo에 잘못 생성 시 차단)
 KAKAO_CONTEXT.md
 
+# Codex project memory (local operational notes)
+memory/
+
 # vercel
 .vercel
 

@@ -278,6 +278,13 @@ export default function Home() {
             onRestore={selectedChat ? () => setRestoreChatId(selectedChat.id) : undefined}
             onBack={handleBack}
             onOpenAI={() => setMobileAIOpen(true)}
+            onAttachmentDownloaded={(messageId, filePath) => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === messageId ? { ...m, localFilePath: filePath } : m,
+                ),
+              );
+            }}
           />
         </div>
 

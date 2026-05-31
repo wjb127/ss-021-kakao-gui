@@ -75,7 +75,7 @@ interface MediaMeta {
 // chatId 는 숫자 문자열 (SQL injection 방지용 숫자 검증)
 async function fetchMediaMeta(chatId: string): Promise<Map<string, MediaMeta>> {
   if (!/^\d+$/.test(chatId)) return new Map();
-  const sql = `SELECT logId, attachment, localFilePath FROM NTChatMessage WHERE chatId=${chatId} AND type IN (2,3,18) AND (attachment IS NOT NULL OR (localFilePath IS NOT NULL AND localFilePath != ''))`;
+  const sql = `SELECT CAST(logId AS TEXT), attachment, localFilePath FROM NTChatMessage WHERE chatId=${chatId} AND type IN (2,3,18,16386) AND (attachment IS NOT NULL OR (localFilePath IS NOT NULL AND localFilePath != ''))`;
   try {
     const { stdout } = await execFileAsync(
       KAKAOCLI_BIN,

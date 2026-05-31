@@ -32,7 +32,19 @@ export async function GET(req: NextRequest) {
     upsertMessages(fresh);
     // SQLite에 누적된 전체 메시지 반환 (카카오 DB 불필요)
     const cached = getCachedMessages(chatId);
-    return NextResponse.json(cached);
+    const freshById = new Map(fresh.map((m) => [m.id, m]));
+    return NextResponse.json(
+      cached.map((m) => {
+        const f = freshById.get(m.id);
+        return f
+          ? {
+              ...m,
+              localFilePath: f.localFilePath,
+              attachment: f.attachment,
+            }
+          : m;
+      }),
+    );
   }
 
   // 10명 초과: 캐시 없이 직접 조회

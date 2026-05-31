@@ -74,11 +74,16 @@ function extFromMime(mt?: string): string {
   return map[mt.toLowerCase()] ?? mt.split("/")[1] ?? "bin";
 }
 
+function safeName(original: string): string {
+  const base = path.basename(original);
+  return base.replace(/[^\w가-힣.\-]/g, "_") || "attachment";
+}
+
 function buildFileName(
   messageId: string,
   meta: AttachmentMeta,
 ): string {
-  if (meta.name) return meta.name;
+  if (meta.name) return `${messageId}_${safeName(meta.name)}`;
   const ext = extFromMime(meta.mt);
   return `kakao_${messageId}.${ext}`;
 }
@@ -148,6 +153,12 @@ export async function POST(req: NextRequest) {
     mkdirSync(chatDir, { recursive: true });
     const fileName = buildFileName(messageId, meta.attachment);
     const filePath = path.join(chatDir, fileName);
+    if (!filePath.startsWith(chatDir + path.sep)) {
+      return NextResponse.json(
+        { error: "저장 경로 오류" },
+        { status: 400 },
+      );
+    }
     writeFileSync(filePath, buf);
 
     recordDownload({

@@ -13,6 +13,7 @@ interface Props {
   onRestore?: () => void;
   onBack?: () => void;
   onOpenAI?: () => void;
+  onAttachmentDownloaded?: (messageId: string, filePath: string) => void;
 }
 
 function dateKey(iso: string): string {
@@ -69,6 +70,16 @@ function toPhotoFilename(iso: string): string {
   }
 }
 
+function isMediaMessage(message: Message): boolean {
+  return message.type === "photo" || message.type === "video" || message.type === "file";
+}
+
+function mediaLabel(type: string): string {
+  if (type === "video") return "동영상";
+  if (type === "file") return "파일";
+  return "사진";
+}
+
 async function openLocalFile(path: string): Promise<string | null> {
   try {
     const res = await fetch("/api/open-file", {
@@ -103,18 +114,31 @@ async function revealLocalFile(path: string): Promise<string | null> {
   }
 }
 
+async function copyText(text: string): Promise<string | null> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
 function MediaMessage({
   message,
   isFromMe,
+  onDownloaded,
 }: {
   message: Message;
   isFromMe: boolean;
+  onDownloaded?: (messageId: string, filePath: string) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
-  const [localPath, setLocalPath] = useState<string | undefined>(message.localFilePath);
+  const [optimisticPath, setOptimisticPath] = useState<string | undefined>();
+  const [copiedPath, setCopiedPath] = useState(false);
+  const localPath = optimisticPath ?? message.localFilePath;
   const icon = message.type === "video" ? "🎥" : message.type === "file" ? "📎" : "📷";
-  const label = message.type === "video" ? "동영상" : message.type === "file" ? "파일" : "사진";
+  const label = mediaLabel(message.type);
   const filename = localPath ? localPath.split("/").pop() : null;
   const hasUrl = !!message.attachment?.url;
 
@@ -150,9 +174,8 @@ function MediaMessage({
         setError(data.error || "다운로드 실패");
         return;
       }
-      setLocalPath(data.path);
-      // 다운 직후 자동 열기
-      await openLocalFile(data.path);
+      setOptimisticPath(data.path);
+      onDownloaded?.(message.id, data.path);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -160,14 +183,40 @@ function MediaMessage({
     }
   }
 
+  async function handleCopyPath() {
+    if (!localPath) return;
+    const err = await copyText(localPath);
+    if (err) {
+      setError(err);
+      return;
+    }
+    setError(null);
+    setCopiedPath(true);
+    setTimeout(() => setCopiedPath(false), 1500);
+  }
+
   const btnBase = isFromMe
     ? "bg-[#1D3F7A] hover:bg-[#163266] text-blue-100"
     : "bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36]";
+  const statusClass = localPath
+    ? isFromMe
+      ? "bg-blue-100/20 text-blue-100"
+      : "bg-green-50 text-green-700 border border-green-200"
+    : hasUrl
+      ? isFromMe
+        ? "bg-white/10 text-blue-100"
+        : "bg-amber-50 text-amber-700 border border-amber-200"
+      : isFromMe
+        ? "bg-white/10 text-blue-100"
+        : "bg-gray-100 text-gray-500 border border-gray-200";
 
   return (
     <div className="flex flex-col gap-1">
       <span className="flex items-center gap-2 flex-wrap">
         <span>{icon} {label}</span>
+        <span className={`text-[10px] px-1.5 py-0.5 rounded ${statusClass}`}>
+          {localPath ? "다운로드됨" : hasUrl ? "미다운로드" : "원본없음"}
+        </span>
         {localPath ? (
           <>
             <button
@@ -183,6 +232,13 @@ function MediaMessage({
               title="Finder에서 보기"
             >
               폴더
+            </button>
+            <button
+              onClick={handleCopyPath}
+              className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${btnBase}`}
+              title="다운로드 경로 복사"
+            >
+              {copiedPath ? "경로복사됨" : "경로복사"}
             </button>
           </>
         ) : hasUrl ? (
@@ -212,30 +268,46 @@ function MediaMessage({
   );
 }
 
-function toPlainText(messages: Message[]): string {
+export function toPlainText(messages: Message[]): string {
   const sorted = [...messages].sort((a, b) =>
     a.timestamp.localeCompare(b.timestamp),
   );
   return sorted
-    .filter((m) => m.text?.trim() || m.type === "photo" || m.type === "video" || m.type === "file")
+    .filter((m) => m.text?.trim() || isMediaMessage(m))
     .map((m) => {
       const who = m.is_from_me ? "나" : `상대(${m.sender_id.slice(-4)})`;
       let text = m.text;
-      if (m.type === "photo") text = `[사진: ${toPhotoFilename(m.timestamp)}]`;
-      else if (m.type === "video") text = `[동영상]`;
-      else if (m.type === "file") text = `[파일]`;
+      if (isMediaMessage(m)) {
+        const name = m.localFilePath?.split("/").pop() || toPhotoFilename(m.timestamp);
+        const state = m.localFilePath
+          ? `다운로드됨: ${m.localFilePath}`
+          : "미다운로드";
+        text = `[${mediaLabel(m.type)}: ${name}] [${state}]`;
+      }
       return `[${formatTimestamp(m.timestamp)}] ${who}: ${text}`;
     })
     .join("\n");
 }
 
-export function ChatView({ chat, messages, loading, onRefresh, onRestore, onBack, onOpenAI }: Props) {
+export function ChatView({
+  chat,
+  messages,
+  loading,
+  onRefresh,
+  onRestore,
+  onBack,
+  onOpenAI,
+  onAttachmentDownloaded,
+}: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [rawMode, setRawMode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [manualInput, setManualInput] = useState("");
   const [manualSending, setManualSending] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<string | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   const isManual = !!chat?.id?.startsWith("manual_");
 
@@ -290,6 +362,10 @@ export function ChatView({ chat, messages, loading, onRefresh, onRestore, onBack
   const sorted = [...messages].sort((a, b) =>
     a.timestamp.localeCompare(b.timestamp),
   );
+  const mediaMessages = sorted.filter(isMediaMessage);
+  const downloadedMediaCount = mediaMessages.filter((m) => !!m.localFilePath).length;
+  const downloadableMessages = mediaMessages.filter((m) => !m.localFilePath && !!m.attachment?.url);
+  const downloadBatch = downloadableMessages.slice(0, 20);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -308,6 +384,46 @@ export function ChatView({ chat, messages, loading, onRefresh, onRestore, onBack
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function handleDownloadAll() {
+    if (bulkDownloading || downloadBatch.length === 0) return;
+    setBulkDownloading(true);
+    setBulkError(null);
+    let success = 0;
+    try {
+      for (let i = 0; i < downloadBatch.length; i += 1) {
+        const m = downloadBatch[i];
+        setBulkProgress(`${i + 1}/${downloadBatch.length}`);
+        const res = await fetch("/api/download-attachment", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chatId: m.chat_id,
+            messageId: m.id,
+          }),
+        });
+        const data = (await res.json()) as { path?: string; error?: string };
+        if (!res.ok || !data.path) {
+          setBulkError(`${mediaLabel(m.type)} ${m.id}: ${data.error || "다운로드 실패"}`);
+          continue;
+        }
+        success += 1;
+        onAttachmentDownloaded?.(m.id, data.path);
+      }
+      const remaining = Math.max(downloadableMessages.length - success, 0);
+      setBulkProgress(
+        success > 0
+          ? remaining > 0
+            ? `${success}개 완료 · ${remaining}개 남음`
+            : `${success}개 완료`
+          : null,
+      );
+    } catch (e) {
+      setBulkError(String(e));
+    } finally {
+      setBulkDownloading(false);
+    }
   }
 
   if (!chat) {
@@ -345,7 +461,18 @@ export function ChatView({ chat, messages, loading, onRefresh, onRestore, onBack
             </div>
             <div className="text-xs md:text-[11px] text-[#6B7280]">
               멤버 {chat.member_count}명 · 메시지 {sorted.length}개 ({chat.member_count <= 10 ? "50일" : "10일"})
+              {mediaMessages.length > 0 && (
+                <>
+                  {" · 첨부 "}
+                  {downloadedMediaCount}/{mediaMessages.length}
+                </>
+              )}
             </div>
+            {(bulkProgress || bulkError) && (
+              <div className={`text-[10px] mt-0.5 ${bulkError ? "text-red-500" : "text-[#2959AA]"}`}>
+                {bulkError || `첨부 다운로드 ${bulkProgress}`}
+              </div>
+            )}
           </div>
         </div>
         <div className="flex gap-1 md:gap-1.5 shrink-0 items-center">
@@ -375,6 +502,24 @@ export function ChatView({ chat, messages, loading, onRefresh, onRestore, onBack
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
           </button>
+          {downloadableMessages.length > 0 && (
+            <button
+              onClick={handleDownloadAll}
+              disabled={bulkDownloading}
+              className="hidden md:inline-flex text-[11px] px-2 py-1 rounded transition-colors bg-[#2959AA] text-white hover:bg-[#1F4485] disabled:bg-[#9CA3AF]"
+              title={
+                downloadableMessages.length > 20
+                  ? `미다운로드 첨부 ${downloadableMessages.length}개 중 20개만 순차 다운로드`
+                  : "미다운로드 첨부 전체 순차 다운로드"
+              }
+            >
+              {bulkDownloading
+                ? `다운 ${bulkProgress || ""}`
+                : downloadableMessages.length > 20
+                  ? "전체다운로드 20개"
+                  : "전체다운로드"}
+            </button>
+          )}
           {/* 텍스트 뷰 토글 — 데스크탑 전용 */}
           <button
             onClick={() => setRawMode((v) => !v)}
@@ -483,7 +628,11 @@ export function ChatView({ chat, messages, loading, onRefresh, onRestore, onBack
                         >
                           <div className="whitespace-pre-wrap break-words">
                             {m.type === "photo" || m.type === "video" || m.type === "file" ? (
-                              <MediaMessage message={m} isFromMe={m.is_from_me} />
+                              <MediaMessage
+                                message={m}
+                                isFromMe={m.is_from_me}
+                                onDownloaded={onAttachmentDownloaded}
+                              />
                             ) : (m.text || `[${m.type}]`)}
                           </div>
                           {/* 타임스탬프 */}
