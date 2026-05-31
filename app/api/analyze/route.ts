@@ -9,10 +9,6 @@ import type { Analysis, Message, Urgency } from "@/lib/types";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 const MODEL = process.env.OPENAI_MODEL || "gpt-4.1";
 
 // 분석할 가치 있는 텍스트 메시지만 추출
@@ -43,6 +39,15 @@ function buildConversationDump(messages: Message[]): string {
 
 export async function POST(req: NextRequest) {
   try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "OPENAI_API_KEY 미설정" },
+        { status: 500 },
+      );
+    }
+    const openai = new OpenAI({ apiKey });
+
     const body = (await req.json()) as { chatId?: string };
     if (!body.chatId) {
       return NextResponse.json(
