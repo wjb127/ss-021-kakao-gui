@@ -32,6 +32,15 @@ interface Props {
   onOpenInbox: () => void;
 }
 
+interface ProjectSuggestion {
+  projectPath: string;
+  name: string;
+  confidence: number;
+  reason: string;
+  matchedTerms: string[];
+  signals: string[];
+}
+
 export function ClientCard({ chat, onOpenInbox }: Props) {
   // 분석
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -51,6 +60,9 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
   const [claudeModalPath, setClaudeModalPath] = useState<string | null>(null);
   const [uploadingPath, setUploadingPath] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<Record<string, string>>({});
+  const [suggestingProjects, setSuggestingProjects] = useState(false);
+  const [projectSuggestions, setProjectSuggestions] = useState<ProjectSuggestion[]>([]);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   // UI: 펼침 + 활성 탭
   const [expanded, setExpanded] = useState(false);
@@ -58,6 +70,8 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
 
   // 초기 로드
   useEffect(() => {
+    setProjectSuggestions([]);
+    setSuggestError(null);
     let cancelled = false;
     (async () => {
       try {
@@ -122,6 +136,17 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
     setNewPath("");
   }
 
+  async function addSuggestedPath(projectPath: string) {
+    const res = await fetch("/api/project-mapping", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId: chat.id, projectPath }),
+    });
+    const data = (await res.json()) as { paths: string[] };
+    setPaths(data.paths ?? []);
+    setProjectSuggestions((prev) => prev.filter((item) => item.projectPath !== projectPath));
+  }
+
   async function removePath(p: string) {
     const res = await fetch("/api/project-mapping", {
       method: "DELETE",
@@ -176,6 +201,36 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
     } catch (e) {
       setExportStatus((prev) => ({ ...prev, [p]: `오류: ${String(e)}` }));
     } finally { setExportingPath(null); }
+  }
+
+  async function suggestProjects() {
+    setSuggestingProjects(true);
+    setSuggestError(null);
+    try {
+      const res = await fetch("/api/suggest-projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: chat.id, displayName: chat.display_name }),
+      });
+      const data = (await res.json()) as {
+        suggestions?: ProjectSuggestion[];
+        error?: string;
+      };
+      if (!res.ok) {
+        setSuggestError(data.error || "추천 실패");
+        setProjectSuggestions([]);
+      } else {
+        setProjectSuggestions(data.suggestions ?? []);
+        if ((data.suggestions?.length ?? 0) === 0) {
+          setSuggestError(data.error || "매칭되는 프로젝트를 못 찾음");
+        }
+      }
+    } catch (e) {
+      setSuggestError(String(e));
+      setProjectSuggestions([]);
+    } finally {
+      setSuggestingProjects(false);
+    }
   }
 
   const name = (!chat.display_name || chat.display_name === "(unknown)")
@@ -312,7 +367,46 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
 
             {activeTab === "연동" && (
               <div className="space-y-1.5">
-                <span className="text-[10px] font-medium text-[#6B7280]">연동 프로젝트</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-medium text-[#6B7280]">연동 프로젝트</span>
+                  <button
+                    onClick={suggestProjects}
+                    disabled={suggestingProjects}
+                    className="text-[9px] px-1.5 py-0.5 rounded bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36] disabled:bg-[#9CA3AF] disabled:text-white transition-colors"
+                  >
+                    {suggestingProjects ? "추천…" : "자동추천"}
+                  </button>
+                </div>
+                {(projectSuggestions.length > 0 || suggestError) && (
+                  <div className="space-y-1">
+                    {projectSuggestions.slice(0, 3).map((item) => {
+                      const alreadyMapped = paths.includes(item.projectPath);
+                      return (
+                        <div key={item.projectPath} className="bg-blue-50 border border-blue-100 rounded p-1.5">
+                          <div className="flex items-center gap-1">
+                            <span className="flex-1 min-w-0 text-[10px] font-semibold text-[#1A1F36] truncate" title={item.projectPath}>
+                              {item.name}
+                            </span>
+                            <span className="text-[9px] text-[#2959AA] shrink-0">{item.confidence}%</span>
+                            <button
+                              onClick={() => addSuggestedPath(item.projectPath)}
+                              disabled={alreadyMapped}
+                              className="text-[9px] px-1.5 py-0.5 rounded bg-[#2959AA] hover:bg-[#1D3F7A] text-white disabled:bg-green-500 transition-colors shrink-0"
+                            >
+                              {alreadyMapped ? "적용됨" : "적용"}
+                            </button>
+                          </div>
+                          <div className="text-[9px] text-[#6B7280] truncate mt-0.5">{item.reason}</div>
+                        </div>
+                      );
+                    })}
+                    {suggestError && (
+                      <div className="text-[9px] text-red-600 bg-red-50 border border-red-100 rounded p-1.5">
+                        {suggestError}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {paths.length > 0 && (
                   <ul className="space-y-1">
                     {paths.map((p) => {

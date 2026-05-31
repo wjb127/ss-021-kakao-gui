@@ -24,6 +24,15 @@ function formatTimestamp(iso: string): string {
 type Tab = "분석" | "답변" | "메모" | "연동";
 type Tone = "formal" | "casual" | "brief";
 
+interface ProjectSuggestion {
+  projectPath: string;
+  name: string;
+  confidence: number;
+  reason: string;
+  matchedTerms: string[];
+  signals: string[];
+}
+
 const TONE_LABEL: Record<Tone, string> = {
   formal: "정중",
   casual: "친근",
@@ -62,6 +71,10 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
   const [exportingPath, setExportingPath] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState<Record<string, string>>({});
   const [claudeModalPath, setClaudeModalPath] = useState<string | null>(null);
+  const [suggestingProjects, setSuggestingProjects] = useState(false);
+  const [projectSuggestions, setProjectSuggestions] = useState<ProjectSuggestion[]>([]);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const [suggestScanCount, setSuggestScanCount] = useState(0);
 
   // 채팅 변경 시 전체 초기화 + 데이터 로드
   useEffect(() => {
@@ -73,6 +86,9 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
     setProjectPaths([]);
     setNewPath("");
     setExportStatus({});
+    setProjectSuggestions([]);
+    setSuggestError(null);
+    setSuggestScanCount(0);
     setReplyDraft("");
     setReplyInstruction("");
     setReplyError(null);
@@ -220,6 +236,18 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
     setNewPath("");
   }
 
+  async function addSuggestedPath(projectPath: string) {
+    if (!chat) return;
+    const res = await fetch("/api/project-mapping", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId: chat.id, projectPath }),
+    });
+    const data = (await res.json()) as { paths: string[] };
+    setProjectPaths(data.paths ?? []);
+    setProjectSuggestions((prev) => prev.filter((item) => item.projectPath !== projectPath));
+  }
+
   async function removePath(p: string) {
     if (!chat) return;
     const res = await fetch("/api/project-mapping", {
@@ -248,6 +276,39 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
     } catch (e) {
       setExportStatus((prev) => ({ ...prev, [p]: `오류: ${String(e)}` }));
     } finally { setExportingPath(null); }
+  }
+
+  async function suggestProjects() {
+    if (!chat) return;
+    setSuggestingProjects(true);
+    setSuggestError(null);
+    try {
+      const res = await fetch("/api/suggest-projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: chat.id, displayName: chat.display_name }),
+      });
+      const data = (await res.json()) as {
+        suggestions?: ProjectSuggestion[];
+        scanned?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        setSuggestError(data.error || "추천 실패");
+        setProjectSuggestions([]);
+      } else {
+        setProjectSuggestions(data.suggestions ?? []);
+        setSuggestScanCount(data.scanned ?? 0);
+        if ((data.suggestions?.length ?? 0) === 0) {
+          setSuggestError(data.error || "매칭되는 프로젝트를 못 찾음");
+        }
+      }
+    } catch (e) {
+      setSuggestError(String(e));
+      setProjectSuggestions([]);
+    } finally {
+      setSuggestingProjects(false);
+    }
   }
 
   // ── 빈 상태 ──────────────────────────────────────────────
@@ -589,7 +650,47 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
         {/* ── 연동 탭 ── */}
         {tab === "연동" && (
           <div className="p-3 space-y-2">
-            <div className="text-[10px] text-[#6B7280] mb-1">프로젝트 경로 연동</div>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <div className="text-[10px] text-[#6B7280]">프로젝트 경로 연동</div>
+              <button
+                onClick={suggestProjects}
+                disabled={suggestingProjects}
+                className="text-[10px] px-2 py-1 rounded bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36] disabled:bg-[#9CA3AF] disabled:text-white transition-colors"
+              >
+                {suggestingProjects ? "추천 중..." : "자동추천"}
+              </button>
+            </div>
+            {(projectSuggestions.length > 0 || suggestError) && (
+              <div className="space-y-1">
+                {projectSuggestions.map((item) => {
+                  const alreadyMapped = projectPaths.includes(item.projectPath);
+                  return (
+                    <div key={item.projectPath} className="bg-blue-50 border border-blue-100 rounded p-1.5">
+                      <div className="flex items-center gap-1">
+                        <span className="flex-1 min-w-0 text-[10px] font-semibold text-[#1A1F36] truncate" title={item.projectPath}>
+                          {item.name}
+                        </span>
+                        <span className="text-[9px] text-[#2959AA] shrink-0">{item.confidence}%</span>
+                        <button
+                          onClick={() => addSuggestedPath(item.projectPath)}
+                          disabled={alreadyMapped}
+                          className="text-[9px] px-1.5 py-0.5 rounded bg-[#2959AA] hover:bg-[#1D3F7A] text-white disabled:bg-green-500 transition-colors shrink-0"
+                        >
+                          {alreadyMapped ? "적용됨" : "적용"}
+                        </button>
+                      </div>
+                      <div className="text-[9px] text-[#6B7280] truncate mt-0.5">{item.reason}</div>
+                      <div className="text-[9px] text-[#9CA3AF] truncate mt-0.5">{item.projectPath}</div>
+                    </div>
+                  );
+                })}
+                {suggestError && (
+                  <div className="text-[9px] text-red-600 bg-red-50 border border-red-100 rounded p-1.5">
+                    {suggestError}{suggestScanCount > 0 ? ` · 스캔 ${suggestScanCount}개` : ""}
+                  </div>
+                )}
+              </div>
+            )}
             {projectPaths.length > 0 && (
               <ul className="space-y-1">
                 {projectPaths.map((p) => {
