@@ -308,6 +308,7 @@ export function ChatView({
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkFailedIds, setBulkFailedIds] = useState<Set<string>>(() => new Set());
 
   const isManual = !!chat?.id?.startsWith("manual_");
 
@@ -364,7 +365,9 @@ export function ChatView({
   );
   const mediaMessages = sorted.filter(isMediaMessage);
   const downloadedMediaCount = mediaMessages.filter((m) => !!m.localFilePath).length;
-  const downloadableMessages = mediaMessages.filter((m) => !m.localFilePath && !!m.attachment?.url);
+  const downloadableMessages = mediaMessages
+    .filter((m) => !m.localFilePath && !!m.attachment?.url && !bulkFailedIds.has(m.id))
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   const downloadBatch = downloadableMessages.slice(0, 20);
 
   useEffect(() => {
@@ -377,6 +380,9 @@ export function ChatView({
     setRawMode(false);
     setManualInput("");
     setManualError(null);
+    setBulkProgress(null);
+    setBulkError(null);
+    setBulkFailedIds(new Set());
   }, [chat?.id]);
 
   async function handleCopy() {
@@ -391,6 +397,8 @@ export function ChatView({
     setBulkDownloading(true);
     setBulkError(null);
     let success = 0;
+    let failed = 0;
+    const failedIds = new Set<string>();
     try {
       for (let i = 0; i < downloadBatch.length; i += 1) {
         const m = downloadBatch[i];
@@ -405,18 +413,27 @@ export function ChatView({
         });
         const data = (await res.json()) as { path?: string; error?: string };
         if (!res.ok || !data.path) {
-          setBulkError(`${mediaLabel(m.type)} ${m.id}: ${data.error || "다운로드 실패"}`);
+          failed += 1;
+          failedIds.add(m.id);
+          setBulkError(`${failed}개 건너뜀 · 최근 실패: ${mediaLabel(m.type)} ${m.id}: ${data.error || "다운로드 실패"}`);
           continue;
         }
         success += 1;
         onAttachmentDownloaded?.(m.id, data.path);
       }
-      const remaining = Math.max(downloadableMessages.length - success, 0);
+      if (failedIds.size > 0) {
+        setBulkFailedIds((prev) => {
+          const next = new Set(prev);
+          for (const id of failedIds) next.add(id);
+          return next;
+        });
+      }
+      const remaining = Math.max(downloadableMessages.length - success - failed, 0);
       setBulkProgress(
-        success > 0
+        success > 0 || failed > 0
           ? remaining > 0
-            ? `${success}개 완료 · ${remaining}개 남음`
-            : `${success}개 완료`
+            ? `${success}개 완료 · ${failed}개 건너뜀 · ${remaining}개 남음`
+            : `${success}개 완료 · ${failed}개 건너뜀`
           : null,
       );
     } catch (e) {
