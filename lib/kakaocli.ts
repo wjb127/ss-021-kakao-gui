@@ -71,11 +71,22 @@ interface MediaMeta {
   localFilePath?: string;
 }
 
+function isMultiPhotoText(text: string): boolean {
+  return /사진\s*\d+\s*장|写真\s*\d+\s*枚|n\s+photos/i.test(text);
+}
+
+function hasDownloadableAttachment(attachment?: MessageAttachment): boolean {
+  return !!(
+    attachment?.url ||
+    (Array.isArray(attachment?.imageUrls) && attachment.imageUrls.length > 0)
+  );
+}
+
 // kakao DB 에서 사진/동영상/파일 메시지의 attachment + localFilePath 조회
 // chatId 는 숫자 문자열 (SQL injection 방지용 숫자 검증)
 async function fetchMediaMeta(chatId: string): Promise<Map<string, MediaMeta>> {
   if (!/^\d+$/.test(chatId)) return new Map();
-  const sql = `SELECT CAST(logId AS TEXT), attachment, localFilePath FROM NTChatMessage WHERE chatId=${chatId} AND type IN (2,3,18,16386) AND (attachment IS NOT NULL OR (localFilePath IS NOT NULL AND localFilePath != ''))`;
+  const sql = `SELECT CAST(logId AS TEXT), attachment, localFilePath FROM NTChatMessage WHERE chatId=${chatId} AND type IN (2,3,18,27,16386,16411) AND (attachment IS NOT NULL OR (localFilePath IS NOT NULL AND localFilePath != ''))`;
   try {
     const { stdout } = await execFileAsync(
       KAKAOCLI_BIN,
@@ -146,7 +157,11 @@ export async function listMessages(
     }>;
     // 미디어 메시지가 있을 때만 추가 쿼리 (불필요한 SQL 절약)
     const hasMedia = data.some(
-      (m) => m.type === "photo" || m.type === "video" || m.type === "file",
+      (m) =>
+        m.type === "photo" ||
+        m.type === "video" ||
+        m.type === "file" ||
+        isMultiPhotoText(m.text ?? ""),
     );
     const mediaMap = hasMedia ? await fetchMediaMeta(chatId) : new Map();
     // 인박스 자체 다운로드 경로 (downloads 테이블) — 카톡 앱 path 보다 우선
@@ -170,7 +185,9 @@ export async function listMessages(
         text: m.text ?? "",
         is_from_me: m.is_from_me,
         timestamp: m.timestamp,
-        type: m.type,
+        type: m.type === "unknown" && hasDownloadableAttachment(meta?.attachment)
+          ? "photo"
+          : m.type,
         localFilePath: inboxPath ?? kakaoPath,
         attachment: meta?.attachment,
       };

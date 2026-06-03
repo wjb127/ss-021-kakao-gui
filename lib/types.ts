@@ -14,12 +14,20 @@ export interface Chat {
 export interface MessageAttachment {
   url?: string;
   thumbnailUrl?: string;
+  imageUrls?: string[];
+  thumbnailUrls?: string[];
   w?: number;
   h?: number;
+  wl?: number[];
+  hl?: number[];
   thumbnailWidth?: number;
   thumbnailHeight?: number;
+  thumbnailWidths?: number[];
+  thumbnailHeights?: number[];
   s?: number;
+  sl?: number[];
   mt?: string;
+  mtl?: string[];
   name?: string;
 }
 

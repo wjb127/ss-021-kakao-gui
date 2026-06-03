@@ -20,8 +20,19 @@ const DOWNLOAD_DIR = path.join(os.homedir(), "Downloads", "kakao-inbox");
 interface AttachmentMeta {
   url?: string;
   thumbnailUrl?: string;
+  imageUrls?: string[];
+  thumbnailUrls?: string[];
   s?: number;
+  sl?: number[];
   mt?: string;
+  mtl?: string[];
+  name?: string;
+}
+
+interface DownloadItem {
+  url: string;
+  size?: number;
+  mime?: string;
   name?: string;
 }
 
@@ -82,10 +93,34 @@ function safeName(original: string): string {
 function buildFileName(
   messageId: string,
   meta: AttachmentMeta,
+  index?: number,
 ): string {
-  if (meta.name) return `${messageId}_${safeName(meta.name)}`;
+  if (meta.name && index === undefined) return `${messageId}_${safeName(meta.name)}`;
   const ext = extFromMime(meta.mt);
-  return `kakao_${messageId}.${ext}`;
+  return index === undefined
+    ? `kakao_${messageId}.${ext}`
+    : `kakao_${messageId}_${String(index + 1).padStart(2, "0")}.${ext}`;
+}
+
+function getDownloadItems(meta: AttachmentMeta): DownloadItem[] {
+  if (Array.isArray(meta.imageUrls) && meta.imageUrls.length > 0) {
+    return meta.imageUrls
+      .map((url, index) => ({
+        url,
+        size: meta.sl?.[index],
+        mime: meta.mtl?.[index],
+        name: meta.name,
+      }))
+      .filter((item) => !!item.url);
+  }
+  return meta.url
+    ? [{
+        url: meta.url,
+        size: meta.s,
+        mime: meta.mt,
+        name: meta.name,
+      }]
+    : [];
 }
 
 export async function POST(req: NextRequest) {
@@ -124,55 +159,82 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (!meta.attachment?.url) {
+    if (!meta.attachment) {
       return NextResponse.json(
         { error: "다운로드 URL 없음" },
         { status: 400 },
       );
     }
 
-    // CDN 에서 GET 으로 받기 (HEAD 는 404 지만 GET 통과)
-    const res = await fetch(meta.attachment.url);
-    if (!res.ok) {
+    const items = getDownloadItems(meta.attachment);
+    if (items.length === 0) {
       return NextResponse.json(
-        { error: `CDN 응답 ${res.status}` },
-        { status: 502 },
-      );
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-
-    // 사이즈 검증 (DB 에 기록된 s 와 비교)
-    if (meta.attachment.s && buf.length !== meta.attachment.s) {
-      console.warn(
-        `download size mismatch: expected ${meta.attachment.s}, got ${buf.length}`,
+        { error: "다운로드 URL 없음" },
+        { status: 400 },
       );
     }
 
     // ~/Downloads/kakao-inbox/<chatId>/<filename>
     const chatDir = path.join(DOWNLOAD_DIR, chatId);
     mkdirSync(chatDir, { recursive: true });
-    const fileName = buildFileName(messageId, meta.attachment);
-    const filePath = path.join(chatDir, fileName);
-    if (!filePath.startsWith(chatDir + path.sep)) {
-      return NextResponse.json(
-        { error: "저장 경로 오류" },
-        { status: 400 },
-      );
+
+    const savedPaths: string[] = [];
+    let totalSize = 0;
+    const targetRoot = items.length === 1
+      ? chatDir
+      : path.join(chatDir, `kakao_${messageId}`);
+    mkdirSync(targetRoot, { recursive: true });
+
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      // CDN 에서 GET 으로 받기 (HEAD 는 404 지만 GET 통과)
+      const res = await fetch(item.url);
+      if (!res.ok) {
+        return NextResponse.json(
+          { error: `CDN 응답 ${res.status}`, saved: savedPaths },
+          { status: 502 },
+        );
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+
+      // 사이즈 검증 (DB 에 기록된 s/sl 과 비교)
+      if (item.size && buf.length !== item.size) {
+        console.warn(
+          `download size mismatch: expected ${item.size}, got ${buf.length}`,
+        );
+      }
+
+      const fileName = items.length === 1
+        ? buildFileName(messageId, { ...meta.attachment, mt: item.mime, name: item.name })
+        : buildFileName(messageId, { mt: item.mime, name: item.name }, index);
+      const filePath = path.join(targetRoot, fileName);
+      if (!filePath.startsWith(targetRoot + path.sep)) {
+        return NextResponse.json(
+          { error: "저장 경로 오류" },
+          { status: 400 },
+        );
+      }
+      writeFileSync(filePath, buf);
+      savedPaths.push(filePath);
+      totalSize += buf.length;
     }
-    writeFileSync(filePath, buf);
+
+    const recordPath = items.length === 1 ? savedPaths[0] : targetRoot;
 
     recordDownload({
       messageId,
       chatId,
-      filePath,
-      url: meta.attachment.url,
-      size: buf.length,
+      filePath: recordPath,
+      url: items.map((item) => item.url).join("\n"),
+      size: totalSize,
     });
 
     return NextResponse.json({
-      path: filePath,
-      size: buf.length,
-      source: "cdn",
+      path: recordPath,
+      paths: savedPaths,
+      count: savedPaths.length,
+      size: totalSize,
+      source: items.length === 1 ? "cdn" : "cdn-multi",
     });
   } catch (err) {
     console.error("download-attachment 실패:", err);

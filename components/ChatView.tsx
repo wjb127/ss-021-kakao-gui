@@ -71,13 +71,28 @@ function toPhotoFilename(iso: string): string {
 }
 
 function isMediaMessage(message: Message): boolean {
-  return message.type === "photo" || message.type === "video" || message.type === "file";
+  return message.type === "photo" ||
+    message.type === "video" ||
+    message.type === "file" ||
+    !!message.attachment?.url ||
+    (Array.isArray(message.attachment?.imageUrls) && message.attachment.imageUrls.length > 0);
 }
 
 function mediaLabel(type: string): string {
   if (type === "video") return "동영상";
   if (type === "file") return "파일";
   return "사진";
+}
+
+function attachmentUrlCount(message: Message): number {
+  if (Array.isArray(message.attachment?.imageUrls) && message.attachment.imageUrls.length > 0) {
+    return message.attachment.imageUrls.length;
+  }
+  return message.attachment?.url ? 1 : 0;
+}
+
+function hasDownloadUrl(message: Message): boolean {
+  return attachmentUrlCount(message) > 0;
 }
 
 async function openLocalFile(path: string): Promise<string | null> {
@@ -140,7 +155,8 @@ function MediaMessage({
   const icon = message.type === "video" ? "🎥" : message.type === "file" ? "📎" : "📷";
   const label = mediaLabel(message.type);
   const filename = localPath ? localPath.split("/").pop() : null;
-  const hasUrl = !!message.attachment?.url;
+  const urlCount = attachmentUrlCount(message);
+  const hasUrl = urlCount > 0;
 
   async function handleOpen() {
     if (!localPath) return;
@@ -169,7 +185,7 @@ function MediaMessage({
           messageId: message.id,
         }),
       });
-      const data = (await res.json()) as { path?: string; error?: string };
+      const data = (await res.json()) as { path?: string; count?: number; error?: string };
       if (!res.ok || !data.path) {
         setError(data.error || "다운로드 실패");
         return;
@@ -213,7 +229,7 @@ function MediaMessage({
   return (
     <div className="flex flex-col gap-1">
       <span className="flex items-center gap-2 flex-wrap">
-        <span>{icon} {label}</span>
+        <span>{icon} {label}{urlCount > 1 ? ` ${urlCount}장` : ""}</span>
         <span className={`text-[10px] px-1.5 py-0.5 rounded ${statusClass}`}>
           {localPath ? "다운로드됨" : hasUrl ? "미다운로드" : "원본없음"}
         </span>
@@ -282,7 +298,9 @@ export function toPlainText(messages: Message[]): string {
         const state = m.localFilePath
           ? `다운로드됨: ${m.localFilePath}`
           : "미다운로드";
-        text = `[${mediaLabel(m.type)}: ${name}] [${state}]`;
+        const count = attachmentUrlCount(m);
+        const label = count > 1 ? `${mediaLabel(m.type)} ${count}장` : mediaLabel(m.type);
+        text = `[${label}: ${name}] [${state}]`;
       }
       return `[${formatTimestamp(m.timestamp)}] ${who}: ${text}`;
     })
@@ -366,7 +384,7 @@ export function ChatView({
   const mediaMessages = sorted.filter(isMediaMessage);
   const downloadedMediaCount = mediaMessages.filter((m) => !!m.localFilePath).length;
   const downloadableMessages = mediaMessages
-    .filter((m) => !m.localFilePath && !!m.attachment?.url && !bulkFailedIds.has(m.id))
+    .filter((m) => !m.localFilePath && hasDownloadUrl(m) && !bulkFailedIds.has(m.id))
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   const downloadBatch = downloadableMessages.slice(0, 20);
 
