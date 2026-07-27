@@ -303,15 +303,26 @@ export function ChatList({
   onNewChat,
   onDeleteChat,
 }: Props) {
+  // 채팅방 이름 검색 (컴포넌트 내부 상태 — 상위 페이지 영향 없음)
+  const [query, setQuery] = useState("");
+
   const filtered = useMemo(() => {
-    const list =
+    const byCategory =
       filter === "all"
         ? chats
         : chats.filter((c) => c.category === filter);
+
+    const q = query.trim().toLowerCase();
+    const list = q
+      ? byCategory.filter((c) =>
+          (c.display_name || "").toLowerCase().includes(q),
+        )
+      : byCategory;
+
     return [...list].sort((a, b) =>
       b.last_message_at.localeCompare(a.last_message_at),
     );
-  }, [chats, filter]);
+  }, [chats, filter, query]);
 
   // ── 접힌 상태 ──────────────────────────────────────────
   if (collapsed) {
@@ -443,6 +454,30 @@ export function ChatList({
               {f === "all" ? "전체" : f === "client" ? "고객" : "잡담"}
             </button>
           ))}
+        </div>
+        {/* 이름 검색 */}
+        <div className="relative mt-2">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="채팅방 이름 검색"
+            aria-label="채팅방 이름 검색"
+            className="w-full text-sm md:text-xs pl-7 pr-14 py-2 md:py-1.5 rounded border border-[#D6D8DF] bg-[#F7F8FA] text-[#1A1F36] placeholder:text-[#9AA0AE] focus:outline-none focus:border-[#2959AA]"
+          />
+          <svg
+            className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9AA0AE] pointer-events-none"
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+          </svg>
+          <a
+            href={`/search${query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ""}`}
+            title="메시지 내용까지 검색"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] px-1.5 py-0.5 rounded bg-[#E8E9EC] text-[#2959AA] hover:bg-[#D6D8DF] transition-colors"
+          >
+            대화검색
+          </a>
         </div>
       </div>
 
