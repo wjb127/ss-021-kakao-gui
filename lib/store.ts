@@ -295,6 +295,26 @@ export function finishClaudeRun(
   ).run(status, exitCode, new Date().toISOString(), id);
 }
 
+// 서버 부팅 시 호출 — 'running'으로 남은 run은 전부 orphan이다.
+// 자식 프로세스 레지스트리가 globalThis에 있어 프로세스가 죽으면
+// finishClaudeRun을 호출할 주체가 사라지기 때문에 영원히 running으로 남는다.
+export function reapOrphanRuns(): number {
+  const db = getDb();
+  const res = db
+    .prepare(
+      `UPDATE claude_runs
+       SET status = 'error',
+           finished_at = ?,
+           output = output || ?
+       WHERE status = 'running'`,
+    )
+    .run(
+      new Date().toISOString(),
+      "\n[orphan] 서버가 재시작되어 실행 결과를 확인할 수 없음 — error 처리\n",
+    );
+  return res.changes;
+}
+
 export function getClaudeRun(id: string): ClaudeRun | null {
   const db = getDb();
   const row = db
