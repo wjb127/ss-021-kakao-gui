@@ -55,6 +55,33 @@ export interface Analysis {
   analyzedAt: string;
 }
 
+// ─── 고객 요청 (카톡 자동 추출) ───────────────────────────────────────────────
+
+export type RequestKind =
+  | "fix"      // 수정 요청
+  | "feature"  // 신규 기능/추가
+  | "asset"    // 자료·파일 전달/요청
+  | "question" // 질문 (답변 필요)
+  | "payment"  // 입금/정산 관련
+  | "info";    // 단순 공지·정보
+
+export type RequestStatus = "open" | "in_progress" | "done" | "dismissed";
+
+export interface ClientRequest {
+  id: string;
+  chatId: string;
+  sourceMsgId: string | null;
+  title: string;
+  detail: string;
+  kind: RequestKind;
+  status: RequestStatus;
+  projectPath: string | null;
+  confidence: number | null;
+  runId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CategoriesFile {
   [chatId: string]: Category;
 }

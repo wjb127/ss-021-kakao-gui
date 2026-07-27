@@ -107,6 +107,35 @@ export function getDb(): Database.Database {
 
     CREATE INDEX IF NOT EXISTS idx_downloads_chat
       ON downloads(chat_id);
+
+    -- 고객 요청 (카톡에서 자동 추출된 수정/작업 요청)
+    CREATE TABLE IF NOT EXISTS requests (
+      id            TEXT PRIMARY KEY,
+      chat_id       TEXT NOT NULL,
+      source_msg_id TEXT,                    -- 출처 메시지 (추적용)
+      title         TEXT NOT NULL,           -- 요청 한 줄 요약
+      detail        TEXT NOT NULL DEFAULT '',-- 원문 발췌
+      kind          TEXT NOT NULL,           -- fix|feature|asset|question|payment|info
+      status        TEXT NOT NULL,           -- open|in_progress|done|dismissed
+      project_path  TEXT,                    -- 매칭된 프로젝트 (다음 단계에서 사용)
+      confidence    REAL,                    -- 추출 신뢰도 0~1
+      run_id        TEXT,                    -- claude_runs 연결 (다음 단계에서 사용)
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_requests_chat
+      ON requests(chat_id, status);
+
+    CREATE INDEX IF NOT EXISTS idx_requests_status
+      ON requests(status, created_at DESC);
+
+    -- 요청 추출 커서 (chat별로 어디까지 추출했는지)
+    CREATE TABLE IF NOT EXISTS extract_state (
+      chat_id           TEXT PRIMARY KEY,
+      last_msg_ts       TEXT,                -- 마지막으로 추출에 포함한 메시지 timestamp
+      last_extracted_at TEXT NOT NULL
+    );
   `);
 
   return _db;

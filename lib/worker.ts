@@ -4,6 +4,7 @@
 import { listChats, listMessages } from "./kakaocli";
 import { getLastSeen, setLastSeen, upsertMessages, getSetting, getCategories } from "./store";
 import { sendPush } from "./telegram";
+import { extractRequestsForChat, isExtractEnabled } from "./request-extractor";
 
 const DEFAULT_POLL_SEC = 30;
 const MIN_POLL_SEC = 30;
@@ -68,6 +69,22 @@ async function tick(state: { running: boolean }): Promise<void> {
     const recent = [...chats]
       .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at))
       .slice(0, 10);
+
+    // 요청 추출: last_seen과 무관하게 client 채팅마다 시도.
+    // (추출은 extract_state 커서 + 디바운스로 자체 게이팅되므로 중복 실행 안전)
+    if (isExtractEnabled()) {
+      for (const chat of recent) {
+        if ((categories[chat.id] ?? null) !== "client") continue;
+        try {
+          const r = await extractRequestsForChat(chat.id);
+          if (r.ok && r.inserted) {
+            console.log(`[worker] 요청 ${r.inserted}건 추출 — ${chat.display_name}`);
+          }
+        } catch (e) {
+          console.error("[worker] 요청 추출 에러:", e);
+        }
+      }
+    }
 
     for (const chat of recent) {
       const category = categories[chat.id] ?? null;

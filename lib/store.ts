@@ -1,6 +1,15 @@
 // SQLite 기반 저장소 (better-sqlite3, 동기 API를 async로 래핑)
 import { getDb } from "./db";
-import type { Analysis, CategoriesFile, Category, Message, Urgency } from "./types";
+import type {
+  Analysis,
+  CategoriesFile,
+  Category,
+  ClientRequest,
+  Message,
+  RequestKind,
+  RequestStatus,
+  Urgency,
+} from "./types";
 
 interface CategoryRow {
   chat_id: string;
@@ -422,4 +431,196 @@ export function upsertMessages(messages: Message[]): void {
     }
   });
   insertMany(messages);
+}
+
+// ─── requests (고객 요청 자동 추출) ──────────────────────────────────────────
+
+interface RequestRow {
+  id: string;
+  chat_id: string;
+  source_msg_id: string | null;
+  title: string;
+  detail: string;
+  kind: string;
+  status: string;
+  project_path: string | null;
+  confidence: number | null;
+  run_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const REQUEST_KINDS: RequestKind[] = [
+  "fix",
+  "feature",
+  "asset",
+  "question",
+  "payment",
+  "info",
+];
+const REQUEST_STATUSES: RequestStatus[] = [
+  "open",
+  "in_progress",
+  "done",
+  "dismissed",
+];
+
+function rowToRequest(r: RequestRow): ClientRequest {
+  return {
+    id: r.id,
+    chatId: r.chat_id,
+    sourceMsgId: r.source_msg_id,
+    title: r.title,
+    detail: r.detail,
+    kind: REQUEST_KINDS.includes(r.kind as RequestKind)
+      ? (r.kind as RequestKind)
+      : "info",
+    status: REQUEST_STATUSES.includes(r.status as RequestStatus)
+      ? (r.status as RequestStatus)
+      : "open",
+    projectPath: r.project_path,
+    confidence: r.confidence,
+    runId: r.run_id,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export interface NewRequest {
+  chatId: string;
+  sourceMsgId?: string | null;
+  title: string;
+  detail?: string;
+  kind: RequestKind;
+  confidence?: number | null;
+}
+
+// 새 요청 일괄 저장. 반환값은 실제 삽입 건수
+export function insertRequests(reqs: NewRequest[]): number {
+  if (reqs.length === 0) return 0;
+  const db = getDb();
+  const now = new Date().toISOString();
+  const stmt = db.prepare(
+    `INSERT INTO requests
+     (id, chat_id, source_msg_id, title, detail, kind, status, confidence, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`,
+  );
+  let inserted = 0;
+  const run = db.transaction((items: NewRequest[]) => {
+    for (const r of items) {
+      const id = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      stmt.run(
+        id,
+        r.chatId,
+        r.sourceMsgId ?? null,
+        r.title,
+        r.detail ?? "",
+        r.kind,
+        r.confidence ?? null,
+        now,
+        now,
+      );
+      inserted++;
+    }
+  });
+  run(reqs);
+  return inserted;
+}
+
+export function getOpenRequests(chatId: string): ClientRequest[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      "SELECT * FROM requests WHERE chat_id = ? AND status = 'open' ORDER BY created_at ASC",
+    )
+    .all(chatId) as RequestRow[];
+  return rows.map(rowToRequest);
+}
+
+export function listRequests(opts?: {
+  status?: RequestStatus;
+  chatId?: string;
+  limit?: number;
+}): ClientRequest[] {
+  const db = getDb();
+  const where: string[] = [];
+  const params: (string | number)[] = [];
+  if (opts?.status) {
+    where.push("status = ?");
+    params.push(opts.status);
+  }
+  if (opts?.chatId) {
+    where.push("chat_id = ?");
+    params.push(opts.chatId);
+  }
+  const sql =
+    "SELECT * FROM requests" +
+    (where.length ? ` WHERE ${where.join(" AND ")}` : "") +
+    " ORDER BY created_at DESC LIMIT ?";
+  params.push(opts?.limit ?? 300);
+  const rows = db.prepare(sql).all(...params) as RequestRow[];
+  return rows.map(rowToRequest);
+}
+
+export function updateRequestStatus(id: string, status: RequestStatus): boolean {
+  const db = getDb();
+  const res = db
+    .prepare("UPDATE requests SET status = ?, updated_at = ? WHERE id = ?")
+    .run(status, new Date().toISOString(), id);
+  return res.changes > 0;
+}
+
+export function setRequestProjectPath(id: string, projectPath: string): void {
+  const db = getDb();
+  db.prepare(
+    "UPDATE requests SET project_path = ?, updated_at = ? WHERE id = ?",
+  ).run(projectPath, new Date().toISOString(), id);
+}
+
+// ─── extract_state (요청 추출 커서) ──────────────────────────────────────────
+
+export interface ExtractState {
+  lastMsgTs: string | null;
+  lastExtractedAt: string;
+}
+
+export function getExtractState(chatId: string): ExtractState | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      "SELECT last_msg_ts, last_extracted_at FROM extract_state WHERE chat_id = ?",
+    )
+    .get(chatId) as
+    | { last_msg_ts: string | null; last_extracted_at: string }
+    | undefined;
+  if (!row) return null;
+  return { lastMsgTs: row.last_msg_ts, lastExtractedAt: row.last_extracted_at };
+}
+
+export function setExtractState(chatId: string, lastMsgTs: string): void {
+  const db = getDb();
+  db.prepare(
+    `INSERT OR REPLACE INTO extract_state (chat_id, last_msg_ts, last_extracted_at)
+     VALUES (?, ?, ?)`,
+  ).run(chatId, lastMsgTs, new Date().toISOString());
+}
+
+// ─── 일일 사용 카운터 (API 호출 상한용) ──────────────────────────────────────
+
+function todayKey(prefix: string): string {
+  const d = new Date();
+  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${prefix}:${day}`;
+}
+
+export function getDailyCount(prefix: string): number {
+  const raw = getSetting(todayKey(prefix));
+  const n = raw ? parseInt(raw, 10) : 0;
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function incrementDailyCount(prefix: string): number {
+  const next = getDailyCount(prefix) + 1;
+  setSetting(todayKey(prefix), String(next));
+  return next;
 }

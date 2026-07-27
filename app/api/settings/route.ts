@@ -14,6 +14,8 @@ const KEYS = [
   "claude_skip_permissions",
   "send_enabled",
   "poll_interval_sec",
+  "extract_enabled",
+  "extract_daily_max",
 ] as const;
 
 export async function GET() {

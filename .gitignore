@@ -58,3 +58,6 @@ public/fallback-*.js
 public/fallback-*.js.map
 public/swe-worker-*.js
 public/swe-worker-*.js.map
+
+# 브레인스톰 기획 문서 (로컬 전용)
+brainstorms/
