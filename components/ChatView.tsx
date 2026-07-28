@@ -1,7 +1,7 @@
 "use client";
 
 // 메시지 뷰 - 가운데 패널
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Chat, Message } from "@/lib/types";
 import { parseKmong } from "@/lib/kmong-parser";
 
@@ -9,6 +9,10 @@ interface Props {
   chat: Chat | null;
   messages: Message[];
   loading: boolean;
+  loadingOlder: boolean;
+  hasOlderMessages: boolean;
+  messageTotal: number;
+  onLoadOlder: () => Promise<void>;
   onRefresh: () => void;
   onRestore?: () => void;
   onBack?: () => void;
@@ -160,6 +164,7 @@ function MediaMessage({
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [optimisticPath, setOptimisticPath] = useState<string | undefined>();
+  const [partialDownload, setPartialDownload] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
   const localPath = optimisticPath ?? message.localFilePath;
   const icon = message.type === "video" ? "🎥" : message.type === "file" ? "📎" : "📷";
@@ -195,13 +200,27 @@ function MediaMessage({
           messageId: message.id,
         }),
       });
-      const data = (await res.json()) as { path?: string; count?: number; error?: string };
+      const data = (await res.json()) as {
+        path?: string;
+        count?: number;
+        expectedCount?: number;
+        partial?: boolean;
+        errors?: string[];
+        error?: string;
+      };
       if (!res.ok || !data.path) {
         setError(data.error || "다운로드 실패");
         return;
       }
       setOptimisticPath(data.path);
-      onDownloaded?.(message.id, data.path);
+      setPartialDownload(!!data.partial);
+      if (data.partial) {
+        setError(
+          `${data.count ?? 0}/${data.expectedCount ?? urlCount}개 저장 · ${(data.errors ?? []).join(" · ")}`,
+        );
+      } else {
+        onDownloaded?.(message.id, data.path);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -224,24 +243,28 @@ function MediaMessage({
   const btnBase = isFromMe
     ? "bg-[#1D3F7A] hover:bg-[#163266] text-blue-100"
     : "bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36]";
-  const statusClass = localPath
+  const statusClass = partialDownload
     ? isFromMe
-      ? "bg-blue-100/20 text-blue-100"
-      : "bg-green-50 text-green-700 border border-green-200"
-    : hasUrl
+      ? "bg-amber-100/20 text-amber-100"
+      : "bg-amber-50 text-amber-700 border border-amber-200"
+    : localPath
       ? isFromMe
-        ? "bg-white/10 text-blue-100"
-        : "bg-amber-50 text-amber-700 border border-amber-200"
-      : isFromMe
-        ? "bg-white/10 text-blue-100"
-        : "bg-gray-100 text-gray-500 border border-gray-200";
+        ? "bg-blue-100/20 text-blue-100"
+        : "bg-green-50 text-green-700 border border-green-200"
+      : hasUrl
+        ? isFromMe
+          ? "bg-white/10 text-blue-100"
+          : "bg-amber-50 text-amber-700 border border-amber-200"
+        : isFromMe
+          ? "bg-white/10 text-blue-100"
+          : "bg-gray-100 text-gray-500 border border-gray-200";
 
   return (
     <div className="flex flex-col gap-1">
       <span className="flex items-center gap-2 flex-wrap">
         <span>{icon} {label}{urlCount > 1 ? ` ${urlCount}장` : ""}</span>
         <span className={`text-[10px] px-1.5 py-0.5 rounded ${statusClass}`}>
-          {localPath ? "다운로드됨" : hasUrl ? "미다운로드" : "원본없음"}
+          {partialDownload ? "일부 다운로드" : localPath ? "다운로드됨" : hasUrl ? "미다운로드" : "원본없음"}
         </span>
         {localPath ? (
           <>
@@ -266,6 +289,16 @@ function MediaMessage({
             >
               {copiedPath ? "경로복사됨" : "경로복사"}
             </button>
+            {partialDownload && (
+              <button
+                onClick={handleDownload}
+                disabled={downloading}
+                className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${btnBase} disabled:opacity-60`}
+                title="실패한 첨부 다시 다운로드"
+              >
+                {downloading ? "재시도중…" : "재시도"}
+              </button>
+            )}
           </>
         ) : hasUrl ? (
           <button
@@ -296,6 +329,7 @@ function MediaMessage({
 
 // 최근 N일 복사 버튼 기준일
 const RECENT_COPY_DAYS = 2;
+const MESSAGE_PAGE_SIZE_LABEL = 300;
 
 export function toPlainText(messages: Message[]): string {
   const sorted = [...messages].sort((a, b) =>
@@ -333,6 +367,10 @@ export function ChatView({
   chat,
   messages,
   loading,
+  loadingOlder,
+  hasOlderMessages,
+  messageTotal,
+  onLoadOlder,
   onRefresh,
   onRestore,
   onBack,
@@ -340,6 +378,8 @@ export function ChatView({
   onAttachmentDownloaded,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const previousChatIdRef = useRef<string | null>(null);
+  const previousLastMessageIdRef = useRef<string | null>(null);
   const [rawMode, setRawMode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copied2d, setCopied2d] = useState<"ok" | "none" | null>(null);
@@ -412,10 +452,26 @@ export function ChatView({
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   const downloadBatch = downloadableMessages.slice(0, 20);
 
-  useEffect(() => {
+  const lastMessageId = sorted[sorted.length - 1]?.id ?? null;
+  useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [chat?.id, messages.length]);
+    const chatChanged = previousChatIdRef.current !== (chat?.id ?? null);
+    const latestChanged = previousLastMessageIdRef.current !== lastMessageId;
+    if (el && (chatChanged || latestChanged)) el.scrollTop = el.scrollHeight;
+    previousChatIdRef.current = chat?.id ?? null;
+    previousLastMessageIdRef.current = lastMessageId;
+  }, [chat?.id, lastMessageId]);
+
+  async function handleLoadOlder() {
+    const el = scrollRef.current;
+    const previousHeight = el?.scrollHeight ?? 0;
+    const previousTop = el?.scrollTop ?? 0;
+    await onLoadOlder();
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.scrollTop = previousTop + (el.scrollHeight - previousHeight);
+    });
+  }
 
   // 채팅방 바뀌면 rawMode/입력 초기화
   useEffect(() => {
@@ -472,11 +528,27 @@ export function ChatView({
             messageId: m.id,
           }),
         });
-        const data = (await res.json()) as { path?: string; error?: string };
+        const data = (await res.json()) as {
+          path?: string;
+          partial?: boolean;
+          count?: number;
+          expectedCount?: number;
+          errors?: string[];
+          error?: string;
+        };
         if (!res.ok || !data.path) {
           failed += 1;
           failedIds.add(m.id);
           setBulkError(`${failed}개 건너뜀 · 최근 실패: ${mediaLabel(m.type)} ${m.id}: ${data.error || "다운로드 실패"}`);
+          continue;
+        }
+        if (data.partial) {
+          failed += 1;
+          failedIds.add(m.id);
+          setBulkError(
+            `${failed}개 건너뜀 · 최근 일부 성공: ${mediaLabel(m.type)} ${m.id} ` +
+            `${data.count ?? 0}/${data.expectedCount ?? attachmentUrlCount(m)}개 저장`,
+          );
           continue;
         }
         success += 1;
@@ -538,7 +610,8 @@ export function ChatView({
               : chat.display_name}
             </div>
             <div className="text-xs md:text-[11px] text-[#6B7280]">
-              멤버 {chat.member_count}명 · 메시지 {sorted.length}개 ({chat.member_count <= 10 ? "50일" : "10일"})
+              멤버 {chat.member_count}명 · 메시지 {messageTotal || sorted.length}개
+              {messageTotal > sorted.length && ` · 표시 ${sorted.length}개`}
               {mediaMessages.length > 0 && (
                 <>
                   {" · 첨부 "}
@@ -655,6 +728,17 @@ export function ChatView({
 
       {/* 메시지 스크롤 영역 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        {!loading && hasOlderMessages && (
+          <div className="flex justify-center px-4 pt-3">
+            <button
+              onClick={handleLoadOlder}
+              disabled={loadingOlder}
+              className="text-[11px] px-3 py-1.5 rounded bg-white border border-[#D6D8DF] text-[#2959AA] hover:bg-[#F5F6F8] disabled:text-[#9CA3AF] transition-colors"
+            >
+              {loadingOlder ? "이전 메시지 불러오는 중…" : `이전 메시지 ${MESSAGE_PAGE_SIZE_LABEL}개 불러오기`}
+            </button>
+          </div>
+        )}
         {loading ? (
           <div className="text-center text-[#6B7280] text-xs py-8">
             <div className="inline-block w-5 h-5 border-2 border-[#D6D8DF] border-t-[#2959AA] rounded-full animate-spin mb-2" />

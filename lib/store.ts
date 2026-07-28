@@ -6,6 +6,8 @@ import type {
   Category,
   ClientRequest,
   Message,
+  MessageCursor,
+  MessagePage,
   RequestKind,
   RequestStatus,
   Urgency,
@@ -371,6 +373,56 @@ export function getCachedMessages(chatId: string): Message[] {
     )
     .all(chatId) as MessageRow[];
   return rows.map(rowToMessage);
+}
+
+export function getCachedMessageCount(chatId: string): number {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT COUNT(*) AS count FROM messages WHERE chat_id = ?")
+    .get(chatId) as { count: number };
+  return row.count;
+}
+
+export function getCachedMessagePage(
+  chatId: string,
+  options?: { before?: MessageCursor | null; limit?: number },
+): MessagePage {
+  const db = getDb();
+  const limit = Math.max(50, Math.min(options?.limit ?? 300, 500));
+  const before = options?.before;
+  const rows = before
+    ? db.prepare(
+        `SELECT * FROM messages
+         WHERE chat_id = ?
+           AND (timestamp < ? OR (timestamp = ? AND id < ?))
+         ORDER BY timestamp DESC, id DESC
+         LIMIT ?`,
+      ).all(
+        chatId,
+        before.timestamp,
+        before.timestamp,
+        before.id,
+        limit + 1,
+      ) as MessageRow[]
+    : db.prepare(
+        `SELECT * FROM messages
+         WHERE chat_id = ?
+         ORDER BY timestamp DESC, id DESC
+         LIMIT ?`,
+      ).all(chatId, limit + 1) as MessageRow[];
+  const hasMore = rows.length > limit;
+  const pageRows = rows.slice(0, limit).reverse();
+  const first = pageRows[0];
+
+  return {
+    messages: pageRows.map(rowToMessage),
+    hasMore,
+    nextCursor:
+      hasMore && first
+        ? { timestamp: first.timestamp, id: first.id }
+        : null,
+    total: getCachedMessageCount(chatId),
+  };
 }
 
 // 특정 채팅의 모든 메시지 삭제 (새로파싱 모드용)

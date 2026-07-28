@@ -58,6 +58,19 @@ export interface Message {
   attachment?: MessageAttachment;
 }
 
+export interface MessageCursor {
+  timestamp: string;
+  id: string;
+}
+
+export interface MessagePage {
+  messages: Message[];
+  hasMore: boolean;
+  nextCursor: MessageCursor | null;
+  total: number;
+  deletedMessageIds?: string[];
+}
+
 export type Urgency = "Low" | "Medium" | "High" | "Critical";
 
 export interface Analysis {

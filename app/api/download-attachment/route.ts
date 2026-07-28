@@ -4,10 +4,14 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { getDownload, recordDownload } from "@/lib/store";
+import {
+  downloadAttachmentTasks,
+  type AttachmentDownloadTask,
+} from "@/lib/attachment-downloader";
 
 const execFileAsync = promisify(execFile);
 
@@ -178,32 +182,14 @@ export async function POST(req: NextRequest) {
     const chatDir = path.join(DOWNLOAD_DIR, chatId);
     mkdirSync(chatDir, { recursive: true });
 
-    const savedPaths: string[] = [];
-    let totalSize = 0;
     const targetRoot = items.length === 1
       ? chatDir
       : path.join(chatDir, `kakao_${messageId}`);
     mkdirSync(targetRoot, { recursive: true });
 
+    const tasks: AttachmentDownloadTask[] = [];
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
-      // CDN 에서 GET 으로 받기 (HEAD 는 404 지만 GET 통과)
-      const res = await fetch(item.url);
-      if (!res.ok) {
-        return NextResponse.json(
-          { error: `CDN 응답 ${res.status}`, saved: savedPaths },
-          { status: 502 },
-        );
-      }
-      const buf = Buffer.from(await res.arrayBuffer());
-
-      // 사이즈 검증 (DB 에 기록된 s/sl 과 비교)
-      if (item.size && buf.length !== item.size) {
-        console.warn(
-          `download size mismatch: expected ${item.size}, got ${buf.length}`,
-        );
-      }
-
       const fileName = items.length === 1
         ? buildFileName(messageId, { ...meta.attachment, mt: item.mime, name: item.name })
         : buildFileName(messageId, { mt: item.mime, name: item.name }, index);
@@ -214,27 +200,53 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         );
       }
-      writeFileSync(filePath, buf);
-      savedPaths.push(filePath);
-      totalSize += buf.length;
+      tasks.push({
+        url: item.url,
+        filePath,
+        expectedSize: item.size,
+      });
+    }
+
+    const { savedPaths, errors, totalSize } = await downloadAttachmentTasks(
+      tasks,
+      { force },
+    );
+
+    if (savedPaths.length === 0) {
+      return NextResponse.json(
+        {
+          error: errors.join(" · ") || "다운로드 실패",
+          saved: [],
+          errors,
+          expectedCount: items.length,
+        },
+        { status: 502 },
+      );
     }
 
     const recordPath = items.length === 1 ? savedPaths[0] : targetRoot;
+    const partial = errors.length > 0;
 
-    recordDownload({
-      messageId,
-      chatId,
-      filePath: recordPath,
-      url: items.map((item) => item.url).join("\n"),
-      size: totalSize,
-    });
+    // 일부 실패는 완료로 기록하지 않는다. 다음 호출에서 실패 항목만 재시도한다.
+    if (!partial) {
+      recordDownload({
+        messageId,
+        chatId,
+        filePath: recordPath,
+        url: items.map((item) => item.url).join("\n"),
+        size: totalSize,
+      });
+    }
 
     return NextResponse.json({
       path: recordPath,
       paths: savedPaths,
       count: savedPaths.length,
+      expectedCount: items.length,
       size: totalSize,
       source: items.length === 1 ? "cdn" : "cdn-multi",
+      partial,
+      errors,
     });
   } catch (err) {
     console.error("download-attachment 실패:", err);

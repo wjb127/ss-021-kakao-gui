@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Category, Chat, Message } from "@/lib/types";
+import type {
+  Category,
+  Chat,
+  Message,
+  MessageCursor,
+  MessagePage,
+} from "@/lib/types";
 import { ChatList } from "@/components/ChatList";
 import { ChatView } from "@/components/ChatView";
 import { AIPanel } from "@/components/AIPanel";
@@ -13,12 +19,27 @@ import { RestoreModal } from "@/components/RestoreModal";
 
 type View = "inbox" | "board" | "card";
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
+const MESSAGE_PAGE_SIZE = 300;
+
+function mergeMessages(...groups: Message[][]): Message[] {
+  const byId = new Map<string, Message>();
+  for (const group of groups) {
+    for (const message of group) byId.set(message.id, message);
+  }
+  return [...byId.values()].sort((a, b) =>
+    a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id),
+  );
+}
 
 export default function Home() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
+  const [olderMessagesLoading, setOlderMessagesLoading] = useState(false);
+  const [messageCursor, setMessageCursor] = useState<MessageCursor | null>(null);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [messageTotal, setMessageTotal] = useState(0);
   const [filter, setFilter] = useState<"all" | "client" | "casual">("client");
   const [chatsLoading, setChatsLoading] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -32,6 +53,7 @@ export default function Home() {
   const chatsRequestRef = useRef<Promise<void> | null>(null);
   const messagesRequestRef = useRef<Map<string, Promise<void>>>(new Map());
   const selectedChatIdRef = useRef<string | null>(null);
+  const loadedOlderMessagesRef = useRef(false);
 
   useEffect(() => {
     const dv = localStorage.getItem("defaultView") as View | null;
@@ -79,46 +101,92 @@ export default function Home() {
 
   useEffect(() => { void loadChats(); }, [loadChats]);
 
-  const loadMessages = useCallback((chatId: string, showLoading = true) => {
-    const activeRequest = messagesRequestRef.current.get(chatId);
+  const loadMessages = useCallback((
+    chatId: string,
+    options?: {
+      showLoading?: boolean;
+      before?: MessageCursor | null;
+      prepend?: boolean;
+    },
+  ) => {
+    const showLoading = options?.showLoading ?? true;
+    const before = options?.before ?? null;
+    const prepend = options?.prepend ?? false;
+    const requestKey = `${chatId}:${before?.timestamp ?? "latest"}:${before?.id ?? ""}`;
+    const activeRequest = messagesRequestRef.current.get(requestKey);
     if (activeRequest) return activeRequest;
 
     const chat = chatsRef.current.find((c) => c.id === chatId);
     const memberCount = chat?.member_count ?? 0;
-    if (showLoading) setMessagesLoading(true);
-    const url = chatId.startsWith("manual_")
-      ? `/api/messages?chatId=${chatId}&memberCount=0&manualOnly=true`
-      : `/api/messages?chatId=${chatId}&memberCount=${memberCount}`;
-    const request = fetch(url)
+    if (prepend) setOlderMessagesLoading(true);
+    else if (showLoading) setMessagesLoading(true);
+    const params = new URLSearchParams({
+      chatId,
+      memberCount: chatId.startsWith("manual_") ? "0" : String(memberCount),
+      paginated: "1",
+      limit: String(MESSAGE_PAGE_SIZE),
+    });
+    if (before) {
+      params.set("beforeTimestamp", before.timestamp);
+      params.set("beforeId", before.id);
+    }
+    const request = fetch(`/api/messages?${params.toString()}`)
       .then((r) => {
         if (!r.ok) throw new Error(`메시지 요청 실패: ${r.status}`);
         return r.json();
       })
-      .then((data) => {
+      .then((data: MessagePage) => {
         if (selectedChatIdRef.current === chatId) {
-          setMessages(Array.isArray(data) ? data : []);
+          const incoming = Array.isArray(data.messages) ? data.messages : [];
+          const deletedIds = new Set(data.deletedMessageIds ?? []);
+          setMessages((previous) => {
+            if (prepend) {
+              loadedOlderMessagesRef.current = true;
+              return mergeMessages(incoming, previous);
+            }
+            if (showLoading || previous.length === 0) {
+              loadedOlderMessagesRef.current = false;
+              return incoming;
+            }
+            if (!loadedOlderMessagesRef.current) return incoming;
+            return mergeMessages(
+              previous.filter((message) => !deletedIds.has(message.id)),
+              incoming,
+            );
+          });
+          setMessageTotal(data.total ?? incoming.length);
+          if (prepend || showLoading) {
+            setHasOlderMessages(data.hasMore);
+            setMessageCursor(data.nextCursor);
+          }
         }
       })
       .catch((error) => {
         console.error(error);
-        if (showLoading && selectedChatIdRef.current === chatId) setMessages([]);
+        if (!prepend && showLoading && selectedChatIdRef.current === chatId) {
+          setMessages([]);
+          setMessageTotal(0);
+          setHasOlderMessages(false);
+          setMessageCursor(null);
+        }
       })
       .finally(() => {
-        messagesRequestRef.current.delete(chatId);
-        if (showLoading && selectedChatIdRef.current === chatId) {
+        messagesRequestRef.current.delete(requestKey);
+        if (prepend) setOlderMessagesLoading(false);
+        else if (showLoading && selectedChatIdRef.current === chatId) {
           setMessagesLoading(false);
         }
       });
 
-    messagesRequestRef.current.set(chatId, request);
+    messagesRequestRef.current.set(requestKey, request);
     return request;
   }, []);
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
-    if (!selectedChatId) return;
+    if (!selectedChatId || chats.length === 0) return;
     void loadMessages(selectedChatId);
-  }, [selectedChatId, loadMessages]);
+  }, [selectedChatId, chats.length, loadMessages]);
 
   useEffect(() => {
     const refreshVisibleData = () => {
@@ -126,7 +194,7 @@ export default function Home() {
 
       void loadChats(false);
       const chatId = selectedChatIdRef.current;
-      if (chatId) void loadMessages(chatId, false);
+      if (chatId) void loadMessages(chatId, { showLoading: false });
     };
 
     const intervalId = window.setInterval(
@@ -152,6 +220,10 @@ export default function Home() {
       // 같은 채팅 재클릭 시 메시지 초기화하지 않음 (선택 유지)
       if (prev === id) return prev;
       setMessages([]);
+      setMessageTotal(0);
+      setHasOlderMessages(false);
+      setMessageCursor(null);
+      loadedOlderMessagesRef.current = false;
       return id;
     });
     setMobileAIOpen(false);
@@ -160,12 +232,25 @@ export default function Home() {
   const handleBack = useCallback(() => {
     setSelectedChatId(null);
     setMessages([]);
+    setMessageTotal(0);
+    setHasOlderMessages(false);
+    setMessageCursor(null);
+    loadedOlderMessagesRef.current = false;
     setMobileAIOpen(false);
   }, []);
 
   const handleRefreshMessages = useCallback(() => {
     if (selectedChatId) void loadMessages(selectedChatId);
   }, [selectedChatId, loadMessages]);
+
+  const handleLoadOlderMessages = useCallback(async () => {
+    if (!selectedChatId || !messageCursor || olderMessagesLoading) return;
+    await loadMessages(selectedChatId, {
+      showLoading: false,
+      before: messageCursor,
+      prepend: true,
+    });
+  }, [selectedChatId, messageCursor, olderMessagesLoading, loadMessages]);
 
   const handleCategoryChange = useCallback(
     async (chatId: string, category: Category | null) => {
@@ -199,6 +284,10 @@ export default function Home() {
     ]);
     setSelectedChatId(id);
     setMessages([]);
+    setMessageTotal(0);
+    setHasOlderMessages(false);
+    setMessageCursor(null);
+    loadedOlderMessagesRef.current = false;
     setView("inbox");
   }
 
@@ -212,6 +301,10 @@ export default function Home() {
     if (selectedChatId === chatId) {
       setSelectedChatId(null);
       setMessages([]);
+      setMessageTotal(0);
+      setHasOlderMessages(false);
+      setMessageCursor(null);
+      loadedOlderMessagesRef.current = false;
     }
   }
 
@@ -220,6 +313,10 @@ export default function Home() {
     if (chatId) {
       setSelectedChatId(chatId);
       setMessages([]);
+      setMessageTotal(0);
+      setHasOlderMessages(false);
+      setMessageCursor(null);
+      loadedOlderMessagesRef.current = false;
     }
   }
 
@@ -338,6 +435,10 @@ export default function Home() {
             chat={selectedChat}
             messages={messages}
             loading={messagesLoading}
+            loadingOlder={olderMessagesLoading}
+            hasOlderMessages={hasOlderMessages}
+            messageTotal={messageTotal}
+            onLoadOlder={handleLoadOlderMessages}
             onRefresh={handleRefreshMessages}
             onRestore={selectedChat ? () => setRestoreChatId(selectedChat.id) : undefined}
             onBack={handleBack}

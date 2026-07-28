@@ -8,6 +8,32 @@ import { getDownloadsForChat } from "./store";
 import { formatCallEvent, normalizeKakaoEvents } from "./kakao-events";
 
 const execFileAsync = promisify(execFile);
+const CHAT_CACHE_TTL_MS = 15_000;
+
+interface ChatCacheState {
+  data: Chat[];
+  requestedLimit: number;
+  expiresAt: number;
+  pending: Promise<Chat[]> | null;
+}
+
+const CHAT_CACHE_KEY = "__kakaoInboxChatCache__";
+type GlobalWithChatCache = {
+  [CHAT_CACHE_KEY]?: ChatCacheState;
+};
+
+function getChatCache(): ChatCacheState {
+  const global = globalThis as GlobalWithChatCache;
+  if (!global[CHAT_CACHE_KEY]) {
+    global[CHAT_CACHE_KEY] = {
+      data: [],
+      requestedLimit: 0,
+      expiresAt: 0,
+      pending: null,
+    };
+  }
+  return global[CHAT_CACHE_KEY];
+}
 
 const KAKAOCLI_BIN = process.env.KAKAOCLI_BIN || "kakaocli";
 const DB = process.env.KAKAOCLI_DB || "";
@@ -137,55 +163,77 @@ async function fetchChatDisplayNames(chatIds: string[]): Promise<Map<string, str
 }
 
 export async function listChats(limit = 200): Promise<Chat[]> {
+  const cache = getChatCache();
+  if (cache.expiresAt > Date.now() && cache.requestedLimit >= limit) {
+    return cache.data.slice(0, limit);
+  }
+  if (cache.pending) {
+    const pending = await cache.pending;
+    if (cache.requestedLimit >= limit) return pending.slice(0, limit);
+  }
   if (!DB || !KEY) {
     console.error("KAKAOCLI_DB / KAKAOCLI_KEY 환경변수가 설정되지 않음");
     return [];
   }
-  try {
-    const { stdout } = await execFileAsync(
-      KAKAOCLI_BIN,
-      [
-        "chats",
-        "--json",
-        "--limit",
-        String(limit),
-        "--db",
-        DB,
-        "--key",
-        KEY,
-      ],
-      { maxBuffer: 50 * 1024 * 1024 },
-    );
-    const data = parseSafeJson(stdout) as Array<{
-      id: string | number;
-      display_name: string;
-      member_count: number;
-      unread_count: number;
-      last_message_at: string;
-      type?: string;
-    }>;
-    const missingNameIds = data
-      .map((c) => String(c.id))
-      .filter((id, index) => isMissingDisplayName(data[index].display_name, id));
-    const fallbackNames = await fetchChatDisplayNames(missingNameIds);
+  const request = (async (): Promise<Chat[]> => {
+    try {
+      const { stdout } = await execFileAsync(
+        KAKAOCLI_BIN,
+        [
+          "chats",
+          "--json",
+          "--limit",
+          String(limit),
+          "--db",
+          DB,
+          "--key",
+          KEY,
+        ],
+        { maxBuffer: 50 * 1024 * 1024 },
+      );
+      const data = parseSafeJson(stdout) as Array<{
+        id: string | number;
+        display_name: string;
+        member_count: number;
+        unread_count: number;
+        last_message_at: string;
+        type?: string;
+      }>;
+      const missingNameIds = data
+        .map((c) => String(c.id))
+        .filter((id, index) =>
+          isMissingDisplayName(data[index].display_name, id),
+        );
+      const fallbackNames = await fetchChatDisplayNames(missingNameIds);
 
-    return data.map((c) => {
-      const id = String(c.id);
-      return {
-        id,
-        display_name: isMissingDisplayName(c.display_name, id)
-          ? fallbackNames.get(id) ?? c.display_name ?? "(unknown)"
-          : c.display_name,
-        member_count: c.member_count,
-        unread_count: c.unread_count,
-        last_message_at: c.last_message_at,
-        type: c.type,
-        category: null,
-      };
-    });
-  } catch (err) {
-    console.error("kakaocli chats 실패:", formatKakaoCliError(err));
-    return [];
+      return data.map((c) => {
+        const id = String(c.id);
+        return {
+          id,
+          display_name: isMissingDisplayName(c.display_name, id)
+            ? fallbackNames.get(id) ?? c.display_name ?? "(unknown)"
+            : c.display_name,
+          member_count: c.member_count,
+          unread_count: c.unread_count,
+          last_message_at: c.last_message_at,
+          type: c.type,
+          category: null,
+        };
+      });
+    } catch (err) {
+      console.error("kakaocli chats 실패:", formatKakaoCliError(err));
+      return [];
+    }
+  })();
+  cache.pending = request;
+  try {
+    const chats = await request;
+    cache.data = chats;
+    cache.requestedLimit = limit;
+    cache.expiresAt = Date.now() + CHAT_CACHE_TTL_MS;
+    return chats;
+  } finally {
+    cache.pending = null;
   }
 }
 
@@ -317,9 +365,14 @@ async function fetchSpecialMessages(
 
 // kakao DB 에서 사진/동영상/파일 메시지의 attachment + localFilePath 조회
 // chatId 는 숫자 문자열 (SQL injection 방지용 숫자 검증)
-async function fetchMediaMeta(chatId: string): Promise<Map<string, MediaMeta>> {
+async function fetchMediaMeta(
+  chatId: string,
+  messageIds: string[],
+): Promise<Map<string, MediaMeta>> {
   if (!/^\d+$/.test(chatId)) return new Map();
-  const sql = `SELECT CAST(logId AS TEXT), attachment, localFilePath FROM NTChatMessage WHERE chatId=${chatId} AND type IN (2,3,18,27,16386,16411) AND (attachment IS NOT NULL OR (localFilePath IS NOT NULL AND localFilePath != ''))`;
+  const ids = [...new Set(messageIds)].filter((id) => /^\d+$/.test(id));
+  if (ids.length === 0) return new Map();
+  const sql = `SELECT CAST(logId AS TEXT), attachment, localFilePath FROM NTChatMessage WHERE chatId=${chatId} AND logId IN (${ids.join(",")}) AND type IN (2,3,18,27,16386,16411) AND (attachment IS NOT NULL OR (localFilePath IS NOT NULL AND localFilePath != ''))`;
   try {
     const { stdout } = await execFileAsync(
       KAKAOCLI_BIN,
@@ -349,6 +402,47 @@ async function fetchMediaMeta(chatId: string): Promise<Map<string, MediaMeta>> {
     console.error("fetchMediaMeta 실패:", formatKakaoCliError(err));
     return new Map();
   }
+}
+
+export async function enrichCachedMessages(
+  chatId: string,
+  messages: Message[],
+): Promise<Message[]> {
+  if (messages.length === 0 || !/^\d+$/.test(chatId)) return messages;
+  const senderNames = await fetchUserDisplayNames(
+    messages
+      .filter((message) => !message.is_from_me)
+      .map((message) => message.sender_id),
+  );
+  const mediaMessages = messages.filter((message) =>
+    message.type === "photo" ||
+    message.type === "video" ||
+    message.type === "file",
+  );
+  const mediaMap = await fetchMediaMeta(
+    chatId,
+    mediaMessages.map((message) => message.id),
+  );
+  const inboxDownloads = new Map<string, string>();
+  for (const download of getDownloadsForChat(chatId)) {
+    if (existsSync(download.filePath)) {
+      inboxDownloads.set(download.messageId, download.filePath);
+    }
+  }
+
+  return messages.map((message) => {
+    const meta = mediaMap.get(message.id);
+    const kakaoPath = meta?.localFilePath && existsSync(meta.localFilePath)
+      ? meta.localFilePath
+      : undefined;
+    return {
+      ...message,
+      sender_name: message.sender_name ?? senderNames.get(message.sender_id),
+      attachment: message.attachment ?? meta?.attachment,
+      localFilePath:
+        message.localFilePath ?? inboxDownloads.get(message.id) ?? kakaoPath,
+    };
+  });
 }
 
 export async function listMessages(
@@ -399,7 +493,17 @@ export async function listMessages(
         m.type === "file" ||
         isMultiPhotoText(m.text ?? ""),
     );
-    const mediaMap = hasMedia ? await fetchMediaMeta(chatId) : new Map();
+    const mediaMap = hasMedia
+      ? await fetchMediaMeta(
+          chatId,
+          data.filter((message) =>
+            message.type === "photo" ||
+            message.type === "video" ||
+            message.type === "file" ||
+            isMultiPhotoText(message.text ?? ""),
+          ).map((message) => String(message.id)),
+        )
+      : new Map();
     // 인박스 자체 다운로드 경로 (downloads 테이블) — 카톡 앱 path 보다 우선
     const inboxDownloads = new Map<string, string>();
     if (hasMedia) {
