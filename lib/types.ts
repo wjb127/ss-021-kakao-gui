@@ -36,9 +36,22 @@ export interface Message {
   chat_id: string;
   text: string;
   sender_id: string;
+  sender_name?: string;
   is_from_me: boolean;
   timestamp: string;
   type: string;
+  // 카카오 삭제 이벤트가 가리키는 원본 메시지 ID. 캐시 정리에 사용한다.
+  deleted_message_id?: string;
+  // 카카오 수정 이벤트가 가리키는 원본 메시지 ID. 캐시 정리에 사용한다.
+  edited_message_id?: string;
+  is_edited?: boolean;
+  reply?: {
+    messageId: string;
+    senderId: string;
+    senderName?: string;
+    text: string;
+    type: number;
+  };
   // 카톡 앱에서 다운받은 로컬 파일 경로 (사진/동영상/파일에만 있음)
   localFilePath?: string;
   // 첨부 메타데이터 (썸네일/원본 URL 등). manual 채팅엔 없음

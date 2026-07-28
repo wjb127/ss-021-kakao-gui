@@ -33,6 +33,12 @@ interface MessageRow {
   is_from_me: number;
   timestamp: string;
   type: string;
+  is_edited: number;
+  reply_message_id: string | null;
+  reply_sender_id: string | null;
+  reply_sender_name: string | null;
+  reply_text: string | null;
+  reply_type: number | null;
 }
 
 // ─── categories ──────────────────────────────────────────────────────────────
@@ -344,6 +350,16 @@ function rowToMessage(row: MessageRow): Message {
     is_from_me: row.is_from_me === 1,
     timestamp: row.timestamp,
     type: row.type,
+    is_edited: row.is_edited === 1,
+    reply: row.reply_message_id
+      ? {
+          messageId: row.reply_message_id,
+          senderId: row.reply_sender_id ?? "",
+          senderName: row.reply_sender_name ?? undefined,
+          text: row.reply_text ?? "",
+          type: row.reply_type ?? 1,
+        }
+      : undefined,
   };
 }
 
@@ -361,6 +377,17 @@ export function getCachedMessages(chatId: string): Message[] {
 export function deleteMessagesForChat(chatId: string): void {
   const db = getDb();
   db.prepare("DELETE FROM messages WHERE chat_id = ?").run(chatId);
+}
+
+export function deleteMessagesByIds(messageIds: string[]): void {
+  const ids = [...new Set(messageIds)];
+  if (ids.length === 0) return;
+  const db = getDb();
+  const remove = db.prepare("DELETE FROM messages WHERE id = ?");
+  const removeMany = db.transaction((targetIds: string[]) => {
+    for (const id of targetIds) remove.run(id);
+  });
+  removeMany(ids);
 }
 
 // ─── downloads (인박스 자체 다운로드 추적) ───────────────────────────────────
@@ -428,14 +455,28 @@ export function getDownloadsForChat(chatId: string): DownloadRecord[] {
 
 // ─── messages (캐시 헬퍼) ────────────────────────────────────────────────────
 
-// INSERT OR IGNORE: 이미 있는 id는 건너뜀 (중복 방지)
+// 카카오 원본의 수정·삭제 이벤트 정규화가 캐시에도 반영되도록 갱신한다.
 export function upsertMessages(messages: Message[]): void {
   if (messages.length === 0) return;
   const db = getDb();
   const insert = db.prepare(
-    `INSERT OR IGNORE INTO messages
-     (id, chat_id, sender_id, text, is_from_me, timestamp, type)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO messages
+     (id, chat_id, sender_id, text, is_from_me, timestamp, type, is_edited,
+      reply_message_id, reply_sender_id, reply_sender_name, reply_text, reply_type)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       chat_id = excluded.chat_id,
+       sender_id = excluded.sender_id,
+       text = excluded.text,
+       is_from_me = excluded.is_from_me,
+       timestamp = excluded.timestamp,
+       type = excluded.type,
+       is_edited = excluded.is_edited,
+       reply_message_id = excluded.reply_message_id,
+       reply_sender_id = excluded.reply_sender_id,
+       reply_sender_name = excluded.reply_sender_name,
+       reply_text = excluded.reply_text,
+       reply_type = excluded.reply_type`,
   );
   const insertMany = db.transaction((msgs: Message[]) => {
     for (const m of msgs) {
@@ -447,6 +488,12 @@ export function upsertMessages(messages: Message[]): void {
         m.is_from_me ? 1 : 0,
         m.timestamp,
         m.type,
+        m.is_edited ? 1 : 0,
+        m.reply?.messageId ?? null,
+        m.reply?.senderId ?? null,
+        m.reply?.senderName ?? null,
+        m.reply?.text ?? null,
+        m.reply?.type ?? null,
       );
     }
   });

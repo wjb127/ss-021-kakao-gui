@@ -4,6 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getCachedMessages, getMemo } from "@/lib/store";
 import { listMessages } from "@/lib/kakaocli";
 import type { Message } from "@/lib/types";
+import { formatReplyContext } from "@/lib/message-format";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
     .map((m) => {
       const who = m.is_from_me ? "나" : "상대";
       const text = m.type === "photo" ? "[사진]" : m.text;
-      return `${who}: ${text}`;
+      return `${who}: ${formatReplyContext(m)}${text}`;
     })
     .join("\n");
 

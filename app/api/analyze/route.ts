@@ -5,6 +5,7 @@ import OpenAI from "openai";
 import { listMessages } from "@/lib/kakaocli";
 import { setTodoForChat, getCachedMessages } from "@/lib/store";
 import type { Analysis, Message, Urgency } from "@/lib/types";
+import { formatReplyContext } from "@/lib/message-format";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -14,7 +15,7 @@ const MODEL = process.env.OPENAI_MODEL || "gpt-4.1";
 // 분석할 가치 있는 텍스트 메시지만 추출
 function filterRealText(messages: Message[]): Message[] {
   return messages.filter((m) => {
-    if (m.type !== "text") return false;
+    if (m.type !== "text" && m.type !== "reply") return false;
     const t = (m.text || "").trim();
     if (!t) return false;
     // JSON blob 같은 게 들어오면 스킵
@@ -32,7 +33,7 @@ function buildConversationDump(messages: Message[]): string {
   return sorted
     .map((m) => {
       const who = m.is_from_me ? "나" : `상대(${m.sender_id.slice(-4)})`;
-      return `[${m.timestamp}] ${who}: ${m.text}`;
+      return `[${m.timestamp}] ${who}: ${formatReplyContext(m)}${m.text}`;
     })
     .join("\n");
 }

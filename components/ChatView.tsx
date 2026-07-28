@@ -95,6 +95,16 @@ function hasDownloadUrl(message: Message): boolean {
   return attachmentUrlCount(message) > 0;
 }
 
+function replyPreview(message: Message): string {
+  const reply = message.reply;
+  if (!reply) return "";
+  if (reply.text.trim()) return reply.text.trim();
+  if (reply.type === 2 || reply.type === 27) return "[사진]";
+  if (reply.type === 3) return "[동영상]";
+  if (reply.type === 18) return "[파일]";
+  return "[메시지]";
+}
+
 async function openLocalFile(path: string): Promise<string | null> {
   try {
     const res = await fetch("/api/open-file", {
@@ -294,7 +304,9 @@ export function toPlainText(messages: Message[]): string {
   return sorted
     .filter((m) => m.text?.trim() || isMediaMessage(m))
     .map((m) => {
-      const who = m.is_from_me ? "나" : `상대(${m.sender_id.slice(-4)})`;
+      const who = m.is_from_me
+        ? "나"
+        : m.sender_name || `상대(${m.sender_id.slice(-4)})`;
       let text = m.text;
       if (isMediaMessage(m)) {
         const name = m.localFilePath?.split("/").pop() || toPhotoFilename(m.timestamp);
@@ -305,7 +317,14 @@ export function toPlainText(messages: Message[]): string {
         const label = count > 1 ? `${mediaLabel(m.type)} ${count}장` : mediaLabel(m.type);
         text = `[${label}: ${name}] [${state}]`;
       }
-      return `[${formatTimestamp(m.timestamp)}] ${who}: ${text}`;
+      const edited = m.is_edited ? " (수정됨)" : "";
+      const reply = m.reply
+        ? ` [답장: ${m.reply.senderName || `상대(${m.reply.senderId.slice(-4)})`}: ${replyPreview(m)}]`
+        : "";
+      if (m.type === "system") {
+        return `[${formatTimestamp(m.timestamp)}] 시스템: ${text}`;
+      }
+      return `[${formatTimestamp(m.timestamp)}] ${who}${edited}:${reply} ${text}`;
     })
     .join("\n");
 }
@@ -692,7 +711,7 @@ export function ChatView({
                         {/* 발신자 표시 */}
                         {showSender && (
                           <div className="text-[10px] text-[#6B7280] mb-0.5 ml-1">
-                            {m.sender_id.slice(-6)}
+                            {m.sender_name || m.sender_id.slice(-6)}
                           </div>
                         )}
                         {/* 말풍선: 내 메시지=#2959AA, 상대=흰색 */}
@@ -703,6 +722,22 @@ export function ChatView({
                               : "bg-white text-[#1A1F36] border border-gray-200 rounded-bl-sm"
                           }`}
                         >
+                          {m.reply && (
+                            <div
+                              className={`mb-1.5 border-l-2 pl-2 py-0.5 ${
+                                m.is_from_me
+                                  ? "border-blue-200 text-blue-100"
+                                  : "border-[#9CA3AF] text-[#6B7280]"
+                              }`}
+                            >
+                              <div className="text-[10px] font-medium">
+                                {m.reply.senderName || m.reply.senderId.slice(-6)}
+                              </div>
+                              <div className="text-[11px] leading-4 line-clamp-2 whitespace-pre-wrap break-words">
+                                {replyPreview(m)}
+                              </div>
+                            </div>
+                          )}
                           <div className="whitespace-pre-wrap break-words">
                             {m.type === "photo" || m.type === "video" || m.type === "file" ? (
                               <MediaMessage
@@ -718,7 +753,7 @@ export function ChatView({
                               m.is_from_me ? "text-blue-200" : "text-[#9CA3AF]"
                             }`}
                           >
-                            {formatTime(m.timestamp)}
+                            {formatTime(m.timestamp)}{m.is_edited ? " · 수정됨" : ""}
                           </div>
                         </div>
                       </div>

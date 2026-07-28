@@ -5,6 +5,7 @@ import { writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { getCachedMessages, getTodoForChat, getMemo } from "./store";
 import type { Message } from "./types";
+import { formatReplyContext } from "./message-format";
 
 function formatTimestamp(iso: string): string {
   try {
@@ -32,7 +33,8 @@ function messagesToText(messages: Message[]): string {
     .filter((m) => m.type !== "system" && (m.text?.trim() || m.type === "photo"))
     .map((m) => {
       const who = m.is_from_me ? "나" : `상대(${m.sender_id.slice(-4)})`;
-      const text = m.type === "photo" ? `[사진: ${toPhotoFilename(m.timestamp)}]` : m.text;
+      const body = m.type === "photo" ? `[사진: ${toPhotoFilename(m.timestamp)}]` : m.text;
+      const text = `${formatReplyContext(m)}${body}`;
       return `[${formatTimestamp(m.timestamp)}] ${who}: ${text}`;
     })
     .join("\n");

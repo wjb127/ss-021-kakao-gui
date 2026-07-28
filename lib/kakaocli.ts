@@ -2,8 +2,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
+import bplistParser from "bplist-parser";
 import type { Chat, Message, MessageAttachment } from "./types";
 import { getDownloadsForChat } from "./store";
+import { formatCallEvent, normalizeKakaoEvents } from "./kakao-events";
 
 const execFileAsync = promisify(execFile);
 
@@ -21,6 +23,117 @@ function parseSafeJson(raw: string): unknown {
     '$1"$2"',
   );
   return JSON.parse(wrapped);
+}
+
+function redactCommandSecrets(text: string): string {
+  return text.replace(/--key\s+\S+/g, "--key [redacted]");
+}
+
+function formatKakaoCliError(err: unknown): string {
+  if (err instanceof Error) {
+    return redactCommandSecrets(err.stack ?? err.message);
+  }
+  return redactCommandSecrets(String(err));
+}
+
+function isMissingDisplayName(name: string | null | undefined, id: string): boolean {
+  const trimmed = name?.trim();
+  return !trimmed || trimmed === "(unknown)" || trimmed === id || /^\d{6,}$/.test(trimmed);
+}
+
+async function runQuery(sql: string): Promise<unknown> {
+  const { stdout } = await execFileAsync(
+    KAKAOCLI_BIN,
+    ["query", sql, "--db", DB, "--key", KEY],
+    { maxBuffer: 50 * 1024 * 1024 },
+  );
+  return parseSafeJson(stdout);
+}
+
+async function fetchUserDisplayNames(userIds: string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(userIds)].filter((id) => /^\d+$/.test(id));
+  if (ids.length === 0) return new Map();
+
+  const sql = `SELECT CAST(userId AS TEXT), COALESCE(NULLIF(TRIM(friendNickName), ''), NULLIF(TRIM(displayName), ''), NULLIF(TRIM(nickName), '')) FROM NTUser WHERE userId IN (${ids.join(",")})`;
+  let rows: Array<[string | number, string | null]>;
+  try {
+    rows = (await runQuery(sql)) as Array<[string | number, string | null]>;
+  } catch (err) {
+    console.error("사용자 이름 조회 실패:", formatKakaoCliError(err));
+    return new Map();
+  }
+  const names = new Map<string, string>();
+  for (const [userId, name] of rows) {
+    const trimmed = name?.trim();
+    if (trimmed) names.set(String(userId), trimmed);
+  }
+  return names;
+}
+
+function parseMemberIds(hex: string | null): string[] {
+  if (!hex) return [];
+  try {
+    const [value] = bplistParser.parseBuffer<unknown>(Buffer.from(hex, "hex"));
+    if (!Array.isArray(value)) return [];
+    return value.map(String).filter((id) => /^\d+$/.test(id));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchChatDisplayNames(chatIds: string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(chatIds)].filter((id) => /^\d+$/.test(id));
+  if (ids.length === 0) return new Map();
+
+  const sql = `SELECT CAST(r.chatId AS TEXT), r.type, COALESCE(TRIM(r.chatName), ''), COALESCE((SELECT TRIM(o.linkName) FROM NTOpenLink o WHERE o.linkId = r.linkId LIMIT 1), ''), COALESCE((SELECT COALESCE(NULLIF(TRIM(u.friendNickName), ''), NULLIF(TRIM(u.displayName), ''), NULLIF(TRIM(u.nickName), '')) FROM NTUser u WHERE u.directChatId = r.chatId LIMIT 1), ''), hex(r.displayMemberIds) FROM NTChatRoom r WHERE r.chatId IN (${ids.join(",")})`;
+  let rows: Array<
+    [string | number, number, string, string, string, string | null]
+  >;
+  try {
+    rows = (await runQuery(sql)) as Array<
+      [string | number, number, string, string, string, string | null]
+    >;
+  } catch (err) {
+    console.error("채팅방 이름 조회 실패:", formatKakaoCliError(err));
+    return new Map();
+  }
+  const roomMemberIds = new Map<string, string[]>();
+  const allMemberIds: string[] = [];
+
+  for (const [chatIdValue, , , , , memberIdsHex] of rows) {
+    const chatId = String(chatIdValue);
+    const memberIds = parseMemberIds(memberIdsHex);
+    roomMemberIds.set(chatId, memberIds);
+    allMemberIds.push(...memberIds);
+  }
+
+  const userNames = await fetchUserDisplayNames(allMemberIds);
+  const names = new Map<string, string>();
+  for (const [chatIdValue, roomType, chatName, openLinkName, directName] of rows) {
+    const chatId = String(chatIdValue);
+    if (chatName) {
+      names.set(chatId, chatName);
+      continue;
+    }
+    if (openLinkName) {
+      names.set(chatId, openLinkName);
+      continue;
+    }
+    if (roomType === 5) {
+      names.set(chatId, "나와의 채팅");
+      continue;
+    }
+    if (directName) {
+      names.set(chatId, directName);
+      continue;
+    }
+
+    const memberNames = (roomMemberIds.get(chatId) ?? [])
+      .map((memberId) => userNames.get(memberId))
+      .filter((name): name is string => !!name);
+    if (memberNames.length > 0) names.set(chatId, memberNames.join(", "));
+  }
+  return names;
 }
 
 export async function listChats(limit = 200): Promise<Chat[]> {
@@ -51,17 +164,27 @@ export async function listChats(limit = 200): Promise<Chat[]> {
       last_message_at: string;
       type?: string;
     }>;
-    return data.map((c) => ({
-      id: String(c.id),
-      display_name: c.display_name,
-      member_count: c.member_count,
-      unread_count: c.unread_count,
-      last_message_at: c.last_message_at,
-      type: c.type,
-      category: null,
-    }));
+    const missingNameIds = data
+      .map((c) => String(c.id))
+      .filter((id, index) => isMissingDisplayName(data[index].display_name, id));
+    const fallbackNames = await fetchChatDisplayNames(missingNameIds);
+
+    return data.map((c) => {
+      const id = String(c.id);
+      return {
+        id,
+        display_name: isMissingDisplayName(c.display_name, id)
+          ? fallbackNames.get(id) ?? c.display_name ?? "(unknown)"
+          : c.display_name,
+        member_count: c.member_count,
+        unread_count: c.unread_count,
+        last_message_at: c.last_message_at,
+        type: c.type,
+        category: null,
+      };
+    });
   } catch (err) {
-    console.error("kakaocli chats 실패:", err);
+    console.error("kakaocli chats 실패:", formatKakaoCliError(err));
     return [];
   }
 }
@@ -80,6 +203,116 @@ function hasDownloadableAttachment(attachment?: MessageAttachment): boolean {
     attachment?.url ||
     (Array.isArray(attachment?.imageUrls) && attachment.imageUrls.length > 0)
   );
+}
+
+interface SpecialMessageMeta {
+  type?: string;
+  text?: string;
+  reply?: Message["reply"];
+}
+
+interface SpecialMessages {
+  events: Message[];
+  overlays: Map<string, SpecialMessageMeta>;
+}
+
+function parseEmbeddedJson<T>(text: string): T | null {
+  try {
+    const lossless = text.replace(
+      /("(?:logId|userId|src_logId|src_userId|src_linkId|threadId)"\s*:\s*)(\d{16,})/g,
+      '$1"$2"',
+    );
+    return JSON.parse(lossless) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchSpecialMessages(
+  chatId: string,
+  sinceTimestamp: string,
+): Promise<SpecialMessages> {
+  const empty: SpecialMessages = { events: [], overlays: new Map() };
+  if (!/^\d+$/.test(chatId)) return empty;
+  const sinceSeconds = Math.max(
+    0,
+    Math.floor(new Date(sinceTimestamp).getTime() / 1000),
+  );
+  if (!Number.isFinite(sinceSeconds)) return empty;
+
+  const sql = `SELECT CAST(logId AS TEXT), CAST(authorId AS TEXT), type, COALESCE(message, ''), COALESCE(attachment, ''), sentAt FROM NTChatMessage WHERE chatId=${chatId} AND sentAt>=${sinceSeconds} AND type IN (0,26,51,52,16435,16436) ORDER BY sentAt`;
+  try {
+    const rows = (await runQuery(sql)) as Array<
+      [string | number, string | number, number, string, string, number]
+    >;
+    const myUserId = process.env.KAKAOCLI_USER_ID ?? "";
+    const replyPayloads = rows
+      .filter(([, , type]) => type === 26)
+      .map(([, , , , attachment]) =>
+        parseEmbeddedJson<{
+          src_logId?: string | number;
+          src_userId?: string | number;
+          src_message?: string;
+          src_type?: number;
+        }>(attachment),
+      )
+      .filter((payload): payload is NonNullable<typeof payload> => !!payload);
+    const replySenderNames = await fetchUserDisplayNames(
+      replyPayloads.map((payload) => String(payload.src_userId ?? "")),
+    );
+    const events: Message[] = [];
+    const overlays = new Map<string, SpecialMessageMeta>();
+
+    for (const [logIdValue, authorIdValue, rawType, text, attachment, sentAt] of rows) {
+      const logId = String(logIdValue);
+      const authorId = String(authorIdValue);
+      if (rawType === 0) {
+        events.push({
+          id: logId,
+          chat_id: chatId,
+          sender_id: authorId,
+          text,
+          is_from_me: authorId === myUserId,
+          timestamp: new Date(sentAt * 1000).toISOString(),
+          type: "system",
+        });
+        continue;
+      }
+      if (rawType === 26) {
+        const payload = parseEmbeddedJson<{
+          src_logId?: string | number;
+          src_userId?: string | number;
+          src_message?: string;
+          src_type?: number;
+        }>(attachment);
+        if (!payload) continue;
+        const senderId = String(payload.src_userId ?? "");
+        overlays.set(logId, {
+          type: "reply",
+          reply: {
+            messageId: String(payload.src_logId ?? ""),
+            senderId,
+            senderName: replySenderNames.get(senderId),
+            text: payload.src_message ?? "",
+            type: Number(payload.src_type ?? 1),
+          },
+        });
+        continue;
+      }
+
+      const originalType = rawType >= 16384 ? rawType - 16384 : rawType;
+      if (originalType === 51 || originalType === 52) {
+        overlays.set(logId, {
+          type: "system",
+          text: formatCallEvent(originalType, text),
+        });
+      }
+    }
+    return { events, overlays };
+  } catch (err) {
+    console.error("특수 메시지 조회 실패:", formatKakaoCliError(err));
+    return empty;
+  }
 }
 
 // kakao DB 에서 사진/동영상/파일 메시지의 attachment + localFilePath 조회
@@ -113,7 +346,7 @@ async function fetchMediaMeta(chatId: string): Promise<Map<string, MediaMeta>> {
     }
     return map;
   } catch (err) {
-    console.error("fetchMediaMeta 실패:", err);
+    console.error("fetchMediaMeta 실패:", formatKakaoCliError(err));
     return new Map();
   }
 }
@@ -155,6 +388,9 @@ export async function listMessages(
       timestamp: string;
       type: string;
     }>;
+    const senderNames = await fetchUserDisplayNames(
+      data.filter((m) => !m.is_from_me).map((m) => String(m.sender_id)),
+    );
     // 미디어 메시지가 있을 때만 추가 쿼리 (불필요한 SQL 절약)
     const hasMedia = data.some(
       (m) =>
@@ -171,8 +407,17 @@ export async function listMessages(
         if (existsSync(d.filePath)) inboxDownloads.set(d.messageId, d.filePath);
       }
     }
-    return data.map((m) => {
+    const oldestTimestamp = data.reduce(
+      (oldest, message) =>
+        message.timestamp < oldest ? message.timestamp : oldest,
+      data[0]?.timestamp ?? new Date().toISOString(),
+    );
+    const special = data.length > 0
+      ? await fetchSpecialMessages(chatId, oldestTimestamp)
+      : { events: [], overlays: new Map<string, SpecialMessageMeta>() };
+    const messages: Message[] = data.map((m) => {
       const meta = mediaMap.get(String(m.id));
+      const specialMeta = special.overlays.get(String(m.id));
       const inboxPath = inboxDownloads.get(String(m.id));
       const kakaoPath =
         meta?.localFilePath && existsSync(meta.localFilePath)
@@ -182,18 +427,27 @@ export async function listMessages(
         id: String(m.id),
         chat_id: String(m.chat_id),
         sender_id: String(m.sender_id),
-        text: m.text ?? "",
+        sender_name: senderNames.get(String(m.sender_id)),
+        text: specialMeta?.text ?? m.text ?? "",
         is_from_me: m.is_from_me,
         timestamp: m.timestamp,
-        type: m.type === "unknown" && hasDownloadableAttachment(meta?.attachment)
-          ? "photo"
-          : m.type,
+        type: specialMeta?.type ?? (
+          m.type === "unknown" && hasDownloadableAttachment(meta?.attachment)
+            ? "photo"
+            : m.type
+        ),
+        reply: specialMeta?.reply,
         localFilePath: inboxPath ?? kakaoPath,
         attachment: meta?.attachment,
       };
     });
+    const merged = new Map<string, Message>(
+      messages.map((message) => [message.id, message]),
+    );
+    for (const event of special.events) merged.set(event.id, event);
+    return normalizeKakaoEvents([...merged.values()]);
   } catch (err) {
-    console.error("kakaocli messages 실패:", err);
+    console.error("kakaocli messages 실패:", formatKakaoCliError(err));
     return [];
   }
 }

@@ -29,6 +29,16 @@ export PATH="/Users/seungbeenwi/.nvm/versions/node/v22.22.0/bin:/opt/homebrew/bi
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] kakao-gui start-local mode=$MODE port=$PORT" >> "$LOG_DIR/kakao-gui-launch.log"
 
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] pnpm not found in PATH=$PATH" >> "$LOG_DIR/kakao-gui-launch.log"
+  exit 1
+fi
+
+if [ ! -d "$PROJECT_DIR/node_modules" ]; then
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] node_modules missing; running pnpm install --frozen-lockfile" >> "$LOG_DIR/kakao-gui-launch.log"
+  pnpm install --frozen-lockfile
+fi
+
 # launchd 재시작/수동 재실행 때 남은 dev/start 서버를 정리한다.
 if command -v lsof >/dev/null 2>&1; then
   lsof -tiTCP:"$PORT" -sTCP:LISTEN | xargs kill -9 2>/dev/null || true

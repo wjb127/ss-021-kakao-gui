@@ -20,6 +20,7 @@ import {
   type NewRequest,
 } from "./store";
 import type { Message, RequestKind } from "./types";
+import { formatReplyContext } from "./message-format";
 
 // 마지막 메시지 후 이 시간만큼 조용하면 추출 (연타 묶기)
 const DEBOUNCE_MS = 3 * 60 * 1000;
@@ -78,7 +79,7 @@ function renderTranscript(messages: Message[]): string {
       else if (m.type === "video") text = text || "[동영상]";
       else if (m.type === "file") text = text || `[파일${m.attachment?.name ? `: ${m.attachment.name}` : ""}]`;
       if (!text) return null;
-      return `[${m.timestamp}] ${who}: ${text}`;
+      return `[${m.timestamp}] ${who}: ${formatReplyContext(m)}${text}`;
     })
     .filter(Boolean)
     .join("\n");

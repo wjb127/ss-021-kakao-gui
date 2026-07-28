@@ -3,6 +3,8 @@ import Database from "better-sqlite3";
 import path from "node:path";
 import os from "node:os";
 import { mkdirSync } from "node:fs";
+import { normalizeKakaoEvents } from "./kakao-events";
+import type { Message } from "./types";
 
 const DATA_DIR = path.join(os.homedir(), ".kakaocli");
 const DB_PATH = path.join(DATA_DIR, "kakao-gui.db");
@@ -38,7 +40,13 @@ export function getDb(): Database.Database {
       text        TEXT NOT NULL,
       is_from_me  INTEGER NOT NULL,
       timestamp   TEXT NOT NULL,
-      type        TEXT NOT NULL
+      type        TEXT NOT NULL,
+      is_edited   INTEGER NOT NULL DEFAULT 0,
+      reply_message_id TEXT,
+      reply_sender_id TEXT,
+      reply_sender_name TEXT,
+      reply_text TEXT,
+      reply_type INTEGER
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_chat_id
@@ -137,6 +145,77 @@ export function getDb(): Database.Database {
       last_extracted_at TEXT NOT NULL
     );
   `);
+
+  const messageColumns = new Set(
+    (_db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>)
+      .map((column) => column.name),
+  );
+  const missingColumns: Array<[string, string]> = [
+    ["is_edited", "INTEGER NOT NULL DEFAULT 0"],
+    ["reply_message_id", "TEXT"],
+    ["reply_sender_id", "TEXT"],
+    ["reply_sender_name", "TEXT"],
+    ["reply_text", "TEXT"],
+    ["reply_type", "INTEGER"],
+  ];
+  for (const [name, definition] of missingColumns) {
+    if (!messageColumns.has(name)) {
+      _db.exec(`ALTER TABLE messages ADD COLUMN ${name} ${definition}`);
+    }
+  }
+
+  const eventChatRows = _db.prepare(
+    `SELECT DISTINCT chat_id FROM messages
+     WHERE type = 'system' AND json_valid(text)
+       AND json_type(text, '$.feedType') IS NOT NULL`,
+  ).all() as Array<{ chat_id: string }>;
+  const selectChatMessages = _db.prepare(
+    "SELECT * FROM messages WHERE chat_id = ? ORDER BY timestamp ASC",
+  );
+  const removeMessage = _db.prepare("DELETE FROM messages WHERE id = ?");
+  const updateMessage = _db.prepare(
+    `UPDATE messages SET text = ?, type = ?, is_edited = ? WHERE id = ?`,
+  );
+  const normalizeCached = _db.transaction((chatIds: string[]) => {
+    for (const chatId of chatIds) {
+      const rows = selectChatMessages.all(chatId) as Array<{
+        id: string;
+        chat_id: string;
+        sender_id: string;
+        text: string;
+        is_from_me: number;
+        timestamp: string;
+        type: string;
+        is_edited: number;
+      }>;
+      const originalIds = new Set(rows.map((row) => row.id));
+      const normalized = normalizeKakaoEvents(
+        rows.map((row): Message => ({
+          id: row.id,
+          chat_id: row.chat_id,
+          sender_id: row.sender_id,
+          text: row.text,
+          is_from_me: row.is_from_me === 1,
+          timestamp: row.timestamp,
+          type: row.type,
+          is_edited: row.is_edited === 1,
+        })),
+      );
+      const normalizedIds = new Set(normalized.map((message) => message.id));
+      for (const id of originalIds) {
+        if (!normalizedIds.has(id)) removeMessage.run(id);
+      }
+      for (const message of normalized) {
+        updateMessage.run(
+          message.text,
+          message.type,
+          message.is_edited ? 1 : 0,
+          message.id,
+        );
+      }
+    }
+  });
+  normalizeCached(eventChatRows.map((row) => row.chat_id));
 
   return _db;
 }

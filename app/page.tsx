@@ -12,6 +12,7 @@ import { NewChatModal } from "@/components/NewChatModal";
 import { RestoreModal } from "@/components/RestoreModal";
 
 type View = "inbox" | "board" | "card";
+const AUTO_REFRESH_INTERVAL_MS = 60_000;
 
 export default function Home() {
   const [chats, setChats] = useState<Chat[]>([]);
@@ -28,6 +29,9 @@ export default function Home() {
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [restoreChatId, setRestoreChatId] = useState<string | null>(null);
   const [mobileAIOpen, setMobileAIOpen] = useState(false);
+  const chatsRequestRef = useRef<Promise<void> | null>(null);
+  const messagesRequestRef = useRef<Map<string, Promise<void>>>(new Map());
+  const selectedChatIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const dv = localStorage.getItem("defaultView") as View | null;
@@ -53,35 +57,95 @@ export default function Home() {
   const chatsRef = useRef<Chat[]>([]);
   useEffect(() => { chatsRef.current = chats; }, [chats]);
 
-  const loadChats = useCallback(() => {
-    setChatsLoading(true);
-    fetch("/api/chats")
-      .then((r) => r.json())
-      .then(setChats)
+  const loadChats = useCallback((showLoading = true) => {
+    if (chatsRequestRef.current) return chatsRequestRef.current;
+
+    if (showLoading) setChatsLoading(true);
+    const request = fetch("/api/chats")
+      .then((r) => {
+        if (!r.ok) throw new Error(`채팅 목록 요청 실패: ${r.status}`);
+        return r.json();
+      })
+      .then((data) => setChats(Array.isArray(data) ? data : []))
       .catch(console.error)
-      .finally(() => setChatsLoading(false));
+      .finally(() => {
+        chatsRequestRef.current = null;
+        if (showLoading) setChatsLoading(false);
+      });
+
+    chatsRequestRef.current = request;
+    return request;
   }, []);
 
-  useEffect(() => { loadChats(); }, [loadChats]);
+  useEffect(() => { void loadChats(); }, [loadChats]);
 
-  const loadMessages = useCallback((chatId: string) => {
+  const loadMessages = useCallback((chatId: string, showLoading = true) => {
+    const activeRequest = messagesRequestRef.current.get(chatId);
+    if (activeRequest) return activeRequest;
+
     const chat = chatsRef.current.find((c) => c.id === chatId);
     const memberCount = chat?.member_count ?? 0;
-    setMessagesLoading(true);
+    if (showLoading) setMessagesLoading(true);
     const url = chatId.startsWith("manual_")
       ? `/api/messages?chatId=${chatId}&memberCount=0&manualOnly=true`
       : `/api/messages?chatId=${chatId}&memberCount=${memberCount}`;
-    fetch(url)
-      .then((r) => r.json())
-      .then((data) => setMessages(Array.isArray(data) ? data : []))
-      .catch(() => setMessages([]))
-      .finally(() => setMessagesLoading(false));
+    const request = fetch(url)
+      .then((r) => {
+        if (!r.ok) throw new Error(`메시지 요청 실패: ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        if (selectedChatIdRef.current === chatId) {
+          setMessages(Array.isArray(data) ? data : []);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        if (showLoading && selectedChatIdRef.current === chatId) setMessages([]);
+      })
+      .finally(() => {
+        messagesRequestRef.current.delete(chatId);
+        if (showLoading && selectedChatIdRef.current === chatId) {
+          setMessagesLoading(false);
+        }
+      });
+
+    messagesRequestRef.current.set(chatId, request);
+    return request;
   }, []);
 
   useEffect(() => {
+    selectedChatIdRef.current = selectedChatId;
     if (!selectedChatId) return;
-    loadMessages(selectedChatId);
+    void loadMessages(selectedChatId);
   }, [selectedChatId, loadMessages]);
+
+  useEffect(() => {
+    const refreshVisibleData = () => {
+      if (document.visibilityState !== "visible") return;
+
+      void loadChats(false);
+      const chatId = selectedChatIdRef.current;
+      if (chatId) void loadMessages(chatId, false);
+    };
+
+    const intervalId = window.setInterval(
+      refreshVisibleData,
+      AUTO_REFRESH_INTERVAL_MS,
+    );
+    window.addEventListener("focus", refreshVisibleData);
+    document.addEventListener("visibilitychange", refreshVisibleData);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshVisibleData);
+      document.removeEventListener("visibilitychange", refreshVisibleData);
+    };
+  }, [loadChats, loadMessages]);
+
+  const handleRefreshChats = useCallback(() => {
+    void loadChats();
+  }, [loadChats]);
 
   const handleSelect = useCallback((id: string) => {
     setSelectedChatId((prev) => {
@@ -100,7 +164,7 @@ export default function Home() {
   }, []);
 
   const handleRefreshMessages = useCallback(() => {
-    if (selectedChatId) loadMessages(selectedChatId);
+    if (selectedChatId) void loadMessages(selectedChatId);
   }, [selectedChatId, loadMessages]);
 
   const handleCategoryChange = useCallback(
@@ -190,7 +254,7 @@ export default function Home() {
             setNewChatOpen(true);
           }}
           refreshing={chatsLoading}
-          onRefresh={loadChats}
+          onRefresh={handleRefreshChats}
         />
         <SettingsModal
           open={settingsOpen}
@@ -218,7 +282,7 @@ export default function Home() {
             setNewChatOpen(true);
           }}
           refreshing={chatsLoading}
-          onRefresh={loadChats}
+          onRefresh={handleRefreshChats}
         />
         <SettingsModal
           open={settingsOpen}
@@ -254,7 +318,7 @@ export default function Home() {
             filter={filter}
             onFilterChange={setFilter}
             onCategoryChange={handleCategoryChange}
-            onRefresh={loadChats}
+            onRefresh={handleRefreshChats}
             refreshing={chatsLoading}
             collapsed={sidebarCollapsed}
             onToggleCollapse={() => setSidebarCollapsed((v) => !v)}

@@ -2,7 +2,12 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { listMessages } from "@/lib/kakaocli";
-import { getCachedMessages, upsertMessages } from "@/lib/store";
+import { normalizeKakaoEvents } from "@/lib/kakao-events";
+import {
+  deleteMessagesByIds,
+  getCachedMessages,
+  upsertMessages,
+} from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -29,20 +34,31 @@ export async function GET(req: NextRequest) {
   if (shouldCache) {
     // kakaocli에서 최신 50일치 가져와서 SQLite에 upsert
     const fresh = await listMessages(chatId, "50d", 5000);
+    deleteMessagesByIds(
+      fresh
+        .map((message) => message.deleted_message_id)
+        .filter((id): id is string => !!id),
+    );
     upsertMessages(fresh);
     // SQLite에 누적된 전체 메시지 반환 (카카오 DB 불필요)
     const cached = getCachedMessages(chatId);
     const freshById = new Map(fresh.map((m) => [m.id, m]));
+    const senderNames = new Map(
+      fresh
+        .filter((m) => m.sender_name)
+        .map((m) => [m.sender_id, m.sender_name as string]),
+    );
     return NextResponse.json(
-      cached.map((m) => {
+      normalizeKakaoEvents(cached).map((m) => {
         const f = freshById.get(m.id);
-        return f
-          ? {
-              ...m,
-              localFilePath: f.localFilePath,
-              attachment: f.attachment,
-            }
-          : m;
+        return {
+          ...m,
+          sender_name: f?.sender_name ?? senderNames.get(m.sender_id),
+          localFilePath: f?.localFilePath,
+          attachment: f?.attachment,
+          reply: f?.reply ?? m.reply,
+          is_edited: f?.is_edited ?? m.is_edited,
+        };
       }),
     );
   }
