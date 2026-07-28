@@ -284,6 +284,9 @@ function MediaMessage({
   );
 }
 
+// 최근 N일 복사 버튼 기준일
+const RECENT_COPY_DAYS = 2;
+
 export function toPlainText(messages: Message[]): string {
   const sorted = [...messages].sort((a, b) =>
     a.timestamp.localeCompare(b.timestamp),
@@ -320,6 +323,8 @@ export function ChatView({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [rawMode, setRawMode] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copied2d, setCopied2d] = useState<"ok" | "none" | null>(null);
+  const [copied2dCount, setCopied2dCount] = useState(0);
   const [manualInput, setManualInput] = useState("");
   const [manualSending, setManualSending] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
@@ -401,6 +406,7 @@ export function ChatView({
     setBulkProgress(null);
     setBulkError(null);
     setBulkFailedIds(new Set());
+    setCopied2d(null);
   }, [chat?.id]);
 
   async function handleCopy() {
@@ -408,6 +414,24 @@ export function ChatView({
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  // 최근 2일치만 복사 (기준: 현재 시각 - 2일)
+  async function handleCopyRecent() {
+    const cutoff = Date.now() - RECENT_COPY_DAYS * 24 * 60 * 60 * 1000;
+    const recent = messages.filter((m) => {
+      const t = new Date(m.timestamp).getTime();
+      return Number.isFinite(t) && t >= cutoff;
+    });
+    if (recent.length === 0) {
+      setCopied2d("none");
+      setTimeout(() => setCopied2d(null), 1800);
+      return;
+    }
+    await navigator.clipboard.writeText(toPlainText(recent));
+    setCopied2dCount(recent.length);
+    setCopied2d("ok");
+    setTimeout(() => setCopied2d(null), 1800);
   }
 
   async function handleDownloadAll() {
@@ -577,6 +601,24 @@ export function ChatView({
               대화복원
             </button>
           )}
+          {/* 최근 2일치 복사 */}
+          <button
+            onClick={handleCopyRecent}
+            className={`text-xs md:text-[11px] px-2.5 py-1.5 md:px-2 md:py-1 rounded transition-colors ${
+              copied2d === "ok"
+                ? "bg-green-500 text-white"
+                : copied2d === "none"
+                  ? "bg-[#FDE8E8] text-[#B23434]"
+                  : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
+            }`}
+            title={`최근 ${RECENT_COPY_DAYS}일치 메시지만 클립보드 복사`}
+          >
+            {copied2d === "ok"
+              ? `${copied2dCount}건 복사됨`
+              : copied2d === "none"
+                ? "2일치 없음"
+                : `${RECENT_COPY_DAYS}일복사`}
+          </button>
           {/* 전체 복사 버튼 */}
           <button
             onClick={handleCopy}
