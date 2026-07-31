@@ -411,13 +411,14 @@ export async function enrichCachedMessages(
   if (messages.length === 0 || !/^\d+$/.test(chatId)) return messages;
   const senderNames = await fetchUserDisplayNames(
     messages
-      .filter((message) => !message.is_from_me)
+      .filter((message) => !message.is_from_me && !message.sender_name)
       .map((message) => message.sender_id),
   );
   const mediaMessages = messages.filter((message) =>
-    message.type === "photo" ||
-    message.type === "video" ||
-    message.type === "file",
+    (message.type === "photo" ||
+      message.type === "video" ||
+      message.type === "file") &&
+    !message.attachment,
   );
   const mediaMap = await fetchMediaMeta(
     chatId,

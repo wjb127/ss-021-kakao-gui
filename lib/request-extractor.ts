@@ -71,7 +71,7 @@ function isDuplicate(title: string, existing: string[]): boolean {
 
 function renderTranscript(messages: Message[]): string {
   return messages
-    .filter((m) => m.type !== "system")
+    .filter((m) => m.type !== "system" && !m.is_deleted)
     .map((m) => {
       const who = m.is_from_me ? "나(개발자)" : "고객";
       let text = m.text?.trim() || "";

@@ -352,13 +352,14 @@ export function toPlainText(messages: Message[]): string {
         text = `[${label}: ${name}] [${state}]`;
       }
       const edited = m.is_edited ? " (수정됨)" : "";
+      const deleted = m.is_deleted ? " (삭제됨, 원문 보존)" : "";
       const reply = m.reply
         ? ` [답장: ${m.reply.senderName || `상대(${m.reply.senderId.slice(-4)})`}: ${replyPreview(m)}]`
         : "";
       if (m.type === "system") {
         return `[${formatTimestamp(m.timestamp)}] 시스템: ${text}`;
       }
-      return `[${formatTimestamp(m.timestamp)}] ${who}${edited}:${reply} ${text}`;
+      return `[${formatTimestamp(m.timestamp)}] ${who}${edited}${deleted}:${reply} ${text}`;
     })
     .join("\n");
 }
@@ -750,7 +751,7 @@ export function ChatView({
           </div>
         ) : rawMode ? (
           /* 텍스트 뷰: 드래그 선택 쉬운 평문 */
-          <pre className="p-4 text-xs text-[#1A1F36] font-mono whitespace-pre-wrap break-words leading-5 select-all">
+          <pre className="p-4 text-xs text-[#1A1F36] font-mono whitespace-pre-wrap break-words leading-5 select-text cursor-text">
             {toPlainText(messages)}
           </pre>
         ) : (
@@ -806,6 +807,15 @@ export function ChatView({
                               : "bg-white text-[#1A1F36] border border-gray-200 rounded-bl-sm"
                           }`}
                         >
+                          {m.is_deleted && (
+                            <div
+                              className={`mb-1 text-[10px] font-medium ${
+                                m.is_from_me ? "text-red-200" : "text-[#B23434]"
+                              }`}
+                            >
+                              삭제됨 · 원문 보존
+                            </div>
+                          )}
                           {m.reply && (
                             <div
                               className={`mb-1.5 border-l-2 pl-2 py-0.5 ${
@@ -822,7 +832,7 @@ export function ChatView({
                               </div>
                             </div>
                           )}
-                          <div className="whitespace-pre-wrap break-words">
+                          <div className="whitespace-pre-wrap break-words select-text cursor-text">
                             {m.type === "photo" || m.type === "video" || m.type === "file" ? (
                               <MediaMessage
                                 message={m}
@@ -837,7 +847,9 @@ export function ChatView({
                               m.is_from_me ? "text-blue-200" : "text-[#9CA3AF]"
                             }`}
                           >
-                            {formatTime(m.timestamp)}{m.is_edited ? " · 수정됨" : ""}
+                            {formatTime(m.timestamp)}
+                            {m.is_edited ? " · 수정됨" : ""}
+                            {m.is_deleted ? " · 삭제됨" : ""}
                           </div>
                         </div>
                       </div>

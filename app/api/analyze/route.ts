@@ -15,6 +15,7 @@ const MODEL = process.env.OPENAI_MODEL || "gpt-4.1";
 // 분석할 가치 있는 텍스트 메시지만 추출
 function filterRealText(messages: Message[]): Message[] {
   return messages.filter((m) => {
+    if (m.is_deleted) return false;
     if (m.type !== "text" && m.type !== "reply") return false;
     const t = (m.text || "").trim();
     if (!t) return false;

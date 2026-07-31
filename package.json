@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "lsof -ti:3032 | xargs kill -9 2>/dev/null; next dev -p 3032",
+    "dev": "next dev -p 3033",
     "build": "next build",
     "start": "next start -p 3032",
-    "lint": "eslint"
+    "lint": "eslint",
+    "local:app": "./scripts/build-macos-app.sh",
+    "local:install": "./scripts/install-local-app.sh",
+    "local:restart": "./scripts/restart-local-app.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

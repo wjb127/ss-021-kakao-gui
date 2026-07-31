@@ -100,7 +100,7 @@ function feedText(payload: FeedPayload): string | null {
 }
 
 export function normalizeKakaoEvents(messages: Message[]): Message[] {
-  const deletedIds = new Set<string>();
+  const deletedMessages = new Map<string, string>();
   const editedIds = new Set<string>();
   const payloads = new Map<string, FeedPayload>();
 
@@ -112,12 +112,11 @@ export function normalizeKakaoEvents(messages: Message[]): Message[] {
 
     const targetId = String(payload.logId ?? "");
     if (!/^\d+$/.test(targetId)) continue;
-    if (payload.feedType === 14) deletedIds.add(targetId);
+    if (payload.feedType === 14) deletedMessages.set(targetId, message.timestamp);
     if (payload.feedType === 25) editedIds.add(targetId);
   }
 
   return messages
-    .filter((message) => !deletedIds.has(message.id))
     .filter((message) => {
       const feedType = payloads.get(message.id)?.feedType;
       return feedType !== 16 && feedType !== 25;
@@ -133,6 +132,14 @@ export function normalizeKakaoEvents(messages: Message[]): Message[] {
             payload.feedType === 14 ? String(payload.logId ?? "") : undefined,
           edited_message_id:
             payload.feedType === 25 ? String(payload.logId ?? "") : undefined,
+        };
+      }
+      const deletedAt = deletedMessages.get(message.id);
+      if (deletedAt) {
+        return {
+          ...message,
+          is_deleted: true,
+          deleted_at: message.deleted_at ?? deletedAt,
         };
       }
       return editedIds.has(message.id)

@@ -102,7 +102,7 @@ async function tick(state: { running: boolean }): Promise<void> {
       // 새 메시지 가져오기 (1일치)
       const msgs = await listMessages(chat.id, "1d", 50);
       const newOnes = msgs.filter(
-        (m) => m.timestamp > lastSeen && !m.is_from_me,
+        (m) => m.timestamp > lastSeen && !m.is_from_me && !m.is_deleted,
       );
 
       // 캐시 (10명 이하만)

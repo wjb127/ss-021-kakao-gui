@@ -295,6 +295,7 @@ export async function POST(req: NextRequest) {
   }
 
   const messages = getCachedMessages(chatId)
+    .filter((message) => !message.is_deleted)
     .slice(-260)
     .map((message) => message.text)
     .join("\n")

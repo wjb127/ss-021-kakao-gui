@@ -55,7 +55,9 @@ export async function POST(req: NextRequest) {
   }
 
   // 최근 30개로 제한
-  const sorted = [...messages].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const sorted = messages
+    .filter((message) => !message.is_deleted)
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   const recent = sorted.slice(-30);
 
   if (recent.length === 0) {

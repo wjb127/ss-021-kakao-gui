@@ -31,11 +31,16 @@ interface MessageRow {
   id: string;
   chat_id: string;
   sender_id: string;
+  sender_name: string | null;
   text: string;
   is_from_me: number;
   timestamp: string;
   type: string;
   is_edited: number;
+  is_deleted: number;
+  deleted_at: string | null;
+  local_file_path: string | null;
+  attachment_json: string | null;
   reply_message_id: string | null;
   reply_sender_id: string | null;
   reply_sender_name: string | null;
@@ -344,15 +349,28 @@ export function listClaudeRunsByChat(chatId: string, limit = 20): ClaudeRun[] {
 // ─── messages (캐시) ─────────────────────────────────────────────────────────
 
 function rowToMessage(row: MessageRow): Message {
+  let attachment: Message["attachment"];
+  if (row.attachment_json) {
+    try {
+      attachment = JSON.parse(row.attachment_json) as Message["attachment"];
+    } catch {
+      attachment = undefined;
+    }
+  }
   return {
     id: row.id,
     chat_id: row.chat_id,
     sender_id: row.sender_id,
+    sender_name: row.sender_name ?? undefined,
     text: row.text,
     is_from_me: row.is_from_me === 1,
     timestamp: row.timestamp,
     type: row.type,
     is_edited: row.is_edited === 1,
+    is_deleted: row.is_deleted === 1,
+    deleted_at: row.deleted_at ?? undefined,
+    localFilePath: row.local_file_path ?? undefined,
+    attachment,
     reply: row.reply_message_id
       ? {
           messageId: row.reply_message_id,
@@ -431,17 +449,6 @@ export function deleteMessagesForChat(chatId: string): void {
   db.prepare("DELETE FROM messages WHERE chat_id = ?").run(chatId);
 }
 
-export function deleteMessagesByIds(messageIds: string[]): void {
-  const ids = [...new Set(messageIds)];
-  if (ids.length === 0) return;
-  const db = getDb();
-  const remove = db.prepare("DELETE FROM messages WHERE id = ?");
-  const removeMany = db.transaction((targetIds: string[]) => {
-    for (const id of targetIds) remove.run(id);
-  });
-  removeMany(ids);
-}
-
 // ─── downloads (인박스 자체 다운로드 추적) ───────────────────────────────────
 
 export interface DownloadRecord {
@@ -507,15 +514,16 @@ export function getDownloadsForChat(chatId: string): DownloadRecord[] {
 
 // ─── messages (캐시 헬퍼) ────────────────────────────────────────────────────
 
-// 카카오 원본의 수정·삭제 이벤트 정규화가 캐시에도 반영되도록 갱신한다.
+// 삭제 이벤트는 tombstone으로만 기록하고 원문과 첨부 데이터는 유지한다.
 export function upsertMessages(messages: Message[]): void {
   if (messages.length === 0) return;
   const db = getDb();
   const insert = db.prepare(
     `INSERT INTO messages
      (id, chat_id, sender_id, text, is_from_me, timestamp, type, is_edited,
+      is_deleted, deleted_at, sender_name, local_file_path, attachment_json,
       reply_message_id, reply_sender_id, reply_sender_name, reply_text, reply_type)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        chat_id = excluded.chat_id,
        sender_id = excluded.sender_id,
@@ -524,11 +532,24 @@ export function upsertMessages(messages: Message[]): void {
        timestamp = excluded.timestamp,
        type = excluded.type,
        is_edited = excluded.is_edited,
+       is_deleted = CASE
+         WHEN messages.is_deleted = 1 OR excluded.is_deleted = 1 THEN 1
+         ELSE 0
+       END,
+       deleted_at = COALESCE(messages.deleted_at, excluded.deleted_at),
+       sender_name = COALESCE(excluded.sender_name, messages.sender_name),
+       local_file_path = COALESCE(excluded.local_file_path, messages.local_file_path),
+       attachment_json = COALESCE(excluded.attachment_json, messages.attachment_json),
        reply_message_id = excluded.reply_message_id,
        reply_sender_id = excluded.reply_sender_id,
        reply_sender_name = excluded.reply_sender_name,
        reply_text = excluded.reply_text,
        reply_type = excluded.reply_type`,
+  );
+  const markDeleted = db.prepare(
+    `UPDATE messages
+     SET is_deleted = 1, deleted_at = COALESCE(deleted_at, ?)
+     WHERE id = ?`,
   );
   const insertMany = db.transaction((msgs: Message[]) => {
     for (const m of msgs) {
@@ -541,12 +562,22 @@ export function upsertMessages(messages: Message[]): void {
         m.timestamp,
         m.type,
         m.is_edited ? 1 : 0,
+        m.is_deleted ? 1 : 0,
+        m.deleted_at ?? null,
+        m.sender_name ?? null,
+        m.localFilePath ?? null,
+        m.attachment ? JSON.stringify(m.attachment) : null,
         m.reply?.messageId ?? null,
         m.reply?.senderId ?? null,
         m.reply?.senderName ?? null,
         m.reply?.text ?? null,
         m.reply?.type ?? null,
       );
+    }
+    for (const event of msgs) {
+      if (event.deleted_message_id) {
+        markDeleted.run(event.timestamp, event.deleted_message_id);
+      }
     }
   });
   insertMany(messages);

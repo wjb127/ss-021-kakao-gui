@@ -37,11 +37,16 @@ export function getDb(): Database.Database {
       id          TEXT PRIMARY KEY,
       chat_id     TEXT NOT NULL,
       sender_id   TEXT NOT NULL,
+      sender_name TEXT,
       text        TEXT NOT NULL,
       is_from_me  INTEGER NOT NULL,
       timestamp   TEXT NOT NULL,
       type        TEXT NOT NULL,
       is_edited   INTEGER NOT NULL DEFAULT 0,
+      is_deleted  INTEGER NOT NULL DEFAULT 0,
+      deleted_at  TEXT,
+      local_file_path TEXT,
+      attachment_json TEXT,
       reply_message_id TEXT,
       reply_sender_id TEXT,
       reply_sender_name TEXT,
@@ -152,6 +157,11 @@ export function getDb(): Database.Database {
   );
   const missingColumns: Array<[string, string]> = [
     ["is_edited", "INTEGER NOT NULL DEFAULT 0"],
+    ["is_deleted", "INTEGER NOT NULL DEFAULT 0"],
+    ["deleted_at", "TEXT"],
+    ["sender_name", "TEXT"],
+    ["local_file_path", "TEXT"],
+    ["attachment_json", "TEXT"],
     ["reply_message_id", "TEXT"],
     ["reply_sender_id", "TEXT"],
     ["reply_sender_name", "TEXT"],
@@ -174,7 +184,10 @@ export function getDb(): Database.Database {
   );
   const removeMessage = _db.prepare("DELETE FROM messages WHERE id = ?");
   const updateMessage = _db.prepare(
-    `UPDATE messages SET text = ?, type = ?, is_edited = ? WHERE id = ?`,
+    `UPDATE messages
+     SET text = ?, type = ?, is_edited = ?, is_deleted = ?,
+         deleted_at = COALESCE(deleted_at, ?)
+     WHERE id = ?`,
   );
   const normalizeCached = _db.transaction((chatIds: string[]) => {
     for (const chatId of chatIds) {
@@ -187,6 +200,8 @@ export function getDb(): Database.Database {
         timestamp: string;
         type: string;
         is_edited: number;
+        is_deleted: number;
+        deleted_at: string | null;
       }>;
       const originalIds = new Set(rows.map((row) => row.id));
       const normalized = normalizeKakaoEvents(
@@ -199,6 +214,8 @@ export function getDb(): Database.Database {
           timestamp: row.timestamp,
           type: row.type,
           is_edited: row.is_edited === 1,
+          is_deleted: row.is_deleted === 1,
+          deleted_at: row.deleted_at ?? undefined,
         })),
       );
       const normalizedIds = new Set(normalized.map((message) => message.id));
@@ -210,6 +227,8 @@ export function getDb(): Database.Database {
           message.text,
           message.type,
           message.is_edited ? 1 : 0,
+          message.is_deleted ? 1 : 0,
+          message.deleted_at ?? null,
           message.id,
         );
       }

@@ -35,7 +35,8 @@ function messagesToText(messages: Message[]): string {
       const who = m.is_from_me ? "나" : `상대(${m.sender_id.slice(-4)})`;
       const body = m.type === "photo" ? `[사진: ${toPhotoFilename(m.timestamp)}]` : m.text;
       const text = `${formatReplyContext(m)}${body}`;
-      return `[${formatTimestamp(m.timestamp)}] ${who}: ${text}`;
+      const deleted = m.is_deleted ? " [삭제됨, 원문 보존]" : "";
+      return `[${formatTimestamp(m.timestamp)}] ${who}${deleted}: ${text}`;
     })
     .join("\n");
 }

@@ -20,6 +20,15 @@ import { RestoreModal } from "@/components/RestoreModal";
 type View = "inbox" | "board" | "card";
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
 const MESSAGE_PAGE_SIZE = 300;
+const MESSAGE_CACHE_LIMIT = 8;
+
+interface CachedChatMessages {
+  messages: Message[];
+  total: number;
+  hasOlder: boolean;
+  cursor: MessageCursor | null;
+  loadedOlder: boolean;
+}
 
 function mergeMessages(...groups: Message[][]): Message[] {
   const byId = new Map<string, Message>();
@@ -29,6 +38,20 @@ function mergeMessages(...groups: Message[][]): Message[] {
   return [...byId.values()].sort((a, b) =>
     a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id),
   );
+}
+
+function setCachedChat(
+  cache: Map<string, CachedChatMessages>,
+  chatId: string,
+  value: CachedChatMessages,
+): void {
+  cache.delete(chatId);
+  cache.set(chatId, value);
+  while (cache.size > MESSAGE_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (!oldest) break;
+    cache.delete(oldest);
+  }
 }
 
 export default function Home() {
@@ -54,6 +77,7 @@ export default function Home() {
   const messagesRequestRef = useRef<Map<string, Promise<void>>>(new Map());
   const selectedChatIdRef = useRef<string | null>(null);
   const loadedOlderMessagesRef = useRef(false);
+  const messageCacheRef = useRef<Map<string, CachedChatMessages>>(new Map());
 
   useEffect(() => {
     const dv = localStorage.getItem("defaultView") as View | null;
@@ -107,12 +131,14 @@ export default function Home() {
       showLoading?: boolean;
       before?: MessageCursor | null;
       prepend?: boolean;
+      sync?: boolean;
     },
   ) => {
     const showLoading = options?.showLoading ?? true;
     const before = options?.before ?? null;
     const prepend = options?.prepend ?? false;
-    const requestKey = `${chatId}:${before?.timestamp ?? "latest"}:${before?.id ?? ""}`;
+    const sync = options?.sync ?? true;
+    const requestKey = `${chatId}:${before?.timestamp ?? "latest"}:${before?.id ?? ""}:${sync ? "sync" : "cache"}`;
     const activeRequest = messagesRequestRef.current.get(requestKey);
     if (activeRequest) return activeRequest;
 
@@ -125,6 +151,7 @@ export default function Home() {
       memberCount: chatId.startsWith("manual_") ? "0" : String(memberCount),
       paginated: "1",
       limit: String(MESSAGE_PAGE_SIZE),
+      sync: sync ? "1" : "0",
     });
     if (before) {
       params.set("beforeTimestamp", before.timestamp);
@@ -136,29 +163,54 @@ export default function Home() {
         return r.json();
       })
       .then((data: MessagePage) => {
-        if (selectedChatIdRef.current === chatId) {
-          const incoming = Array.isArray(data.messages) ? data.messages : [];
-          const deletedIds = new Set(data.deletedMessageIds ?? []);
-          setMessages((previous) => {
-            if (prepend) {
-              loadedOlderMessagesRef.current = true;
-              return mergeMessages(incoming, previous);
-            }
-            if (showLoading || previous.length === 0) {
-              loadedOlderMessagesRef.current = false;
-              return incoming;
-            }
-            if (!loadedOlderMessagesRef.current) return incoming;
-            return mergeMessages(
-              previous.filter((message) => !deletedIds.has(message.id)),
+        const incoming = Array.isArray(data.messages) ? data.messages : [];
+        const deletedIds = new Set(data.deletedMessageIds ?? []);
+        const cached = messageCacheRef.current.get(chatId);
+        const updateMessages = (previous: Message[]) => {
+          const loadedOlder = selectedChatIdRef.current === chatId
+            ? loadedOlderMessagesRef.current
+            : cached?.loadedOlder ?? false;
+          let next: Message[];
+          if (prepend) {
+            next = mergeMessages(incoming, previous);
+          } else if (showLoading || previous.length === 0 || !loadedOlder) {
+            next = incoming;
+          } else {
+            next = mergeMessages(
+              previous.map((message) =>
+                deletedIds.has(message.id)
+                  ? { ...message, is_deleted: true }
+                  : message,
+              ),
               incoming,
             );
+          }
+
+          const resetPage = prepend || showLoading;
+          setCachedChat(messageCacheRef.current, chatId, {
+            messages: next,
+            total: data.total ?? next.length,
+            hasOlder: resetPage ? data.hasMore : cached?.hasOlder ?? data.hasMore,
+            cursor: resetPage ? data.nextCursor : cached?.cursor ?? data.nextCursor,
+            loadedOlder: prepend ? true : showLoading ? false : loadedOlder,
+          });
+          return next;
+        };
+
+        if (selectedChatIdRef.current === chatId) {
+          setMessages((previous) => {
+            const next = updateMessages(previous);
+            if (prepend) loadedOlderMessagesRef.current = true;
+            else if (showLoading) loadedOlderMessagesRef.current = false;
+            return next;
           });
           setMessageTotal(data.total ?? incoming.length);
           if (prepend || showLoading) {
             setHasOlderMessages(data.hasMore);
             setMessageCursor(data.nextCursor);
           }
+        } else {
+          updateMessages(cached?.messages ?? []);
         }
       })
       .catch((error) => {
@@ -182,11 +234,40 @@ export default function Home() {
     return request;
   }, []);
 
+  const restoreCachedChat = useCallback((chatId: string): boolean => {
+    const cached = messageCacheRef.current.get(chatId);
+    if (!cached) return false;
+    setCachedChat(messageCacheRef.current, chatId, cached);
+    setMessages(cached.messages);
+    setMessageTotal(cached.total);
+    setHasOlderMessages(cached.hasOlder);
+    setMessageCursor(cached.cursor);
+    loadedOlderMessagesRef.current = cached.loadedOlder;
+    setMessagesLoading(false);
+    return true;
+  }, []);
+
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
     if (!selectedChatId || chats.length === 0) return;
-    void loadMessages(selectedChatId);
-  }, [selectedChatId, chats.length, loadMessages]);
+    const restored = restoreCachedChat(selectedChatId);
+    if (selectedChatId.startsWith("manual_")) {
+      if (!restored) void loadMessages(selectedChatId, { sync: false });
+      return;
+    }
+    if (restored) {
+      void loadMessages(selectedChatId, { showLoading: false, sync: true });
+      return;
+    }
+    void loadMessages(selectedChatId, { sync: false }).then(() => {
+      if (selectedChatIdRef.current !== selectedChatId) return;
+      const hasLocalMessages = (messageCacheRef.current.get(selectedChatId)?.messages.length ?? 0) > 0;
+      return loadMessages(selectedChatId, {
+        showLoading: !hasLocalMessages,
+        sync: true,
+      });
+    });
+  }, [selectedChatId, chats.length, loadMessages, restoreCachedChat]);
 
   useEffect(() => {
     const refreshVisibleData = () => {
@@ -216,20 +297,21 @@ export default function Home() {
   }, [loadChats]);
 
   const handleSelect = useCallback((id: string) => {
-    setSelectedChatId((prev) => {
-      // 같은 채팅 재클릭 시 메시지 초기화하지 않음 (선택 유지)
-      if (prev === id) return prev;
+    if (selectedChatIdRef.current === id) return;
+    selectedChatIdRef.current = id;
+    if (!restoreCachedChat(id)) {
       setMessages([]);
       setMessageTotal(0);
       setHasOlderMessages(false);
       setMessageCursor(null);
       loadedOlderMessagesRef.current = false;
-      return id;
-    });
+    }
+    setSelectedChatId(id);
     setMobileAIOpen(false);
-  }, []);
+  }, [restoreCachedChat]);
 
   const handleBack = useCallback(() => {
+    selectedChatIdRef.current = null;
     setSelectedChatId(null);
     setMessages([]);
     setMessageTotal(0);
@@ -282,6 +364,7 @@ export default function Home() {
       },
       ...prev,
     ]);
+    selectedChatIdRef.current = id;
     setSelectedChatId(id);
     setMessages([]);
     setMessageTotal(0);
@@ -299,6 +382,7 @@ export default function Home() {
     });
     setChats((prev) => prev.filter((c) => c.id !== chatId));
     if (selectedChatId === chatId) {
+      selectedChatIdRef.current = null;
       setSelectedChatId(null);
       setMessages([]);
       setMessageTotal(0);
@@ -306,18 +390,12 @@ export default function Home() {
       setMessageCursor(null);
       loadedOlderMessagesRef.current = false;
     }
+    messageCacheRef.current.delete(chatId);
   }
 
   function switchToInbox(chatId?: string) {
     setView("inbox");
-    if (chatId) {
-      setSelectedChatId(chatId);
-      setMessages([]);
-      setMessageTotal(0);
-      setHasOlderMessages(false);
-      setMessageCursor(null);
-      loadedOlderMessagesRef.current = false;
-    }
+    if (chatId) handleSelect(chatId);
   }
 
   function handleDefaultViewChange(v: View) {
@@ -444,11 +522,21 @@ export default function Home() {
             onBack={handleBack}
             onOpenAI={() => setMobileAIOpen(true)}
             onAttachmentDownloaded={(messageId, filePath) => {
-              setMessages((prev) =>
-                prev.map((m) =>
+              setMessages((prev) => {
+                const next = prev.map((m) =>
                   m.id === messageId ? { ...m, localFilePath: filePath } : m,
-                ),
-              );
+                );
+                if (selectedChatId) {
+                  const cached = messageCacheRef.current.get(selectedChatId);
+                  if (cached) {
+                    setCachedChat(messageCacheRef.current, selectedChatId, {
+                      ...cached,
+                      messages: next,
+                    });
+                  }
+                }
+                return next;
+              });
             }}
           />
         </div>

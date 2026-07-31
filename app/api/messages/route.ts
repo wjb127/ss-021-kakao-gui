@@ -4,7 +4,6 @@ import type { NextRequest } from "next/server";
 import { enrichCachedMessages, listMessages } from "@/lib/kakaocli";
 import { normalizeKakaoEvents } from "@/lib/kakao-events";
 import {
-  deleteMessagesByIds,
   getCachedMessageCount,
   getCachedMessagePage,
   getCachedMessages,
@@ -46,6 +45,7 @@ export async function GET(req: NextRequest) {
     );
   }
   const { paginated, limit, before } = parsePageOptions(req);
+  const shouldSync = req.nextUrl.searchParams.get("sync") !== "0";
 
   // manual chat은 kakaocli 호출 없이 캐시만 반환
   if (chatId.startsWith("manual_")) {
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
     let fresh = [] as Awaited<ReturnType<typeof listMessages>>;
     let deletedMessageIds: string[] = [];
     // 과거 페이지는 SQLite에서만 읽는다. 최신 페이지에서만 카카오 원본과 동기화한다.
-    if (!before) {
+    if (!before && shouldSync) {
       const hasCache = getCachedMessageCount(chatId) > 0;
       fresh = await listMessages(
         chatId,
@@ -75,16 +75,16 @@ export async function GET(req: NextRequest) {
       deletedMessageIds = fresh
         .map((message) => message.deleted_message_id)
         .filter((id): id is string => !!id);
-      deleteMessagesByIds(deletedMessageIds);
       upsertMessages(fresh);
     }
 
     if (paginated) {
       const page = getCachedMessagePage(chatId, { before, limit });
-      const messages = await enrichCachedMessages(
-        chatId,
-        normalizeKakaoEvents(page.messages),
-      );
+      const cachedMessages = normalizeKakaoEvents(page.messages);
+      const messages = shouldSync
+        ? await enrichCachedMessages(chatId, cachedMessages)
+        : cachedMessages;
+      if (shouldSync) upsertMessages(messages);
       const response: MessagePage = {
         ...page,
         messages,

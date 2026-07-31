@@ -40,11 +40,14 @@ export interface Message {
   is_from_me: boolean;
   timestamp: string;
   type: string;
-  // 카카오 삭제 이벤트가 가리키는 원본 메시지 ID. 캐시 정리에 사용한다.
+  // 카카오 삭제 이벤트가 가리키는 원본 메시지 ID.
   deleted_message_id?: string;
   // 카카오 수정 이벤트가 가리키는 원본 메시지 ID. 캐시 정리에 사용한다.
   edited_message_id?: string;
   is_edited?: boolean;
+  // 삭제 여부만 표시하고 원문과 첨부 데이터는 로컬 캐시에 계속 보존한다.
+  is_deleted?: boolean;
+  deleted_at?: string;
   reply?: {
     messageId: string;
     senderId: string;
