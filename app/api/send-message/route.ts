@@ -52,8 +52,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 인박스 목록과 같은 범위를 써서 이미 로드된 kakaocli 결과 캐시를 재사용한다.
-  const chats = await listChats(200);
+  // 발송 대상은 오래된(비활성) 방일 수 있어 목록 기본값(200)으로는 못 찾는다.
+  // kakaocli는 1000건 조회도 0.1초대라 깊게 찾는다.
+  const chats = await listChats(1000);
   const targetChat = chats.find((chat) => chat.id === chatId);
   if (!targetChat) {
     return NextResponse.json(
