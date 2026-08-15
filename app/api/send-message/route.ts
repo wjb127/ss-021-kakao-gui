@@ -1,16 +1,17 @@
-// 카카오톡 자동 발송 (AppleScript)
+// 카카오톡 자동 발송 (프로젝트 전용 macOS 접근성 헬퍼)
 // 안전장치:
 //  - settings.send_enabled === "1" 필수
 //  - body.confirmed === true 필수 (UI에서 사용자 확인 후만 호출)
-//  - 발송 후 SQLite messages 캐시에 own 메시지로 추가 (manual_chat이면 last_message_at도 갱신)
+//  - chatId로 실제 채팅방을 다시 확인한 뒤 발송
 
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import {
   getSetting,
+  replaceCachedMessage,
   upsertMessages,
-  updateManualChatLastMessage,
 } from "@/lib/store";
 import { sendKakaoMessage } from "@/lib/kakao-sender";
+import { listChats, listMessages } from "@/lib/kakaocli";
 import type { Message } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,12 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+  if (chatId.startsWith("manual_")) {
+    return NextResponse.json(
+      { error: "외부에서 복원한 채팅은 카카오톡으로 발송할 수 없음" },
+      { status: 400 },
+    );
+  }
 
   const enabled = getSetting("send_enabled");
   if (enabled !== "1") {
@@ -45,12 +52,26 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const result = await sendKakaoMessage(text);
+  // 인박스 목록과 같은 범위를 써서 이미 로드된 kakaocli 결과 캐시를 재사용한다.
+  const chats = await listChats(200);
+  const targetChat = chats.find((chat) => chat.id === chatId);
+  if (!targetChat) {
+    return NextResponse.json(
+      { error: "선택한 카카오톡 채팅방을 찾을 수 없음" },
+      { status: 404 },
+    );
+  }
+
+  const isSelfChat = targetChat.member_count === 1;
+  const result = await sendKakaoMessage(text, {
+    chatName: targetChat.display_name,
+    isSelf: isSelfChat,
+  });
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 500 });
   }
 
-  // 발송 성공 → 캐시 누적 (보낸 메시지로 기록)
+  // 화면에는 즉시 반영하고 실제 카카오 메시지 ID 동기화는 응답 이후 처리한다.
   const now = new Date().toISOString();
   const msg: Message = {
     id: `sent_${chatId}_${Date.now()}`,
@@ -63,9 +84,30 @@ export async function POST(req: NextRequest) {
   };
   upsertMessages([msg]);
 
-  if (chatId.startsWith("manual_")) {
-    updateManualChatLastMessage(chatId, now);
-  }
+  after(async () => {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      const recent = await listMessages(chatId, "1d", 100);
+      const sentAt = new Date(now).getTime();
+      const actualMessage = recent
+        .filter((message) =>
+          message.is_from_me && message.text.trim() === text.trim()
+        )
+        .map((message) => ({
+          message,
+          distance: Math.abs(new Date(message.timestamp).getTime() - sentAt),
+        }))
+        .filter(({ distance }) => distance < 60_000)
+        .sort((a, b) => a.distance - b.distance)[0]?.message;
+      if (actualMessage) replaceCachedMessage(msg.id, actualMessage);
+    } catch (error) {
+      console.error("발송 메시지 ID 동기화 실패:", error);
+    }
+  });
 
-  return NextResponse.json({ ok: true, message: msg });
+  return NextResponse.json({
+    ok: true,
+    message: msg,
+    target: isSelfChat ? "나와의 채팅" : targetChat.display_name,
+  });
 }

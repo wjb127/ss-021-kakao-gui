@@ -17,6 +17,7 @@ export interface MessageHit {
   text: string;
   snippet: string;
   isFromMe: boolean;
+  senderName?: string;
   timestamp: string;
   type: string;
 }
@@ -69,7 +70,7 @@ export function searchAll(
 
   // ─── 메시지 ───
   const msgParams: (string | number)[] = [like];
-  let msgSql = `SELECT id, chat_id, text, is_from_me, timestamp, type
+  let msgSql = `SELECT id, chat_id, text, is_from_me, sender_name, timestamp, type
                 FROM messages
                 WHERE text LIKE ? ESCAPE '\\'`;
   if (opts?.chatId) {
@@ -84,6 +85,7 @@ export function searchAll(
     chat_id: string;
     text: string;
     is_from_me: number;
+    sender_name: string | null;
     timestamp: string;
     type: string;
   }[];
@@ -95,6 +97,7 @@ export function searchAll(
     text: r.text,
     snippet: makeSnippet(r.text, q),
     isFromMe: r.is_from_me === 1,
+    senderName: r.sender_name ?? undefined,
     timestamp: r.timestamp,
     type: r.type,
   }));

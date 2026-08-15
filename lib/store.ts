@@ -583,6 +583,16 @@ export function upsertMessages(messages: Message[]): void {
   insertMany(messages);
 }
 
+export function replaceCachedMessage(
+  temporaryId: string,
+  message: Message,
+): void {
+  upsertMessages([message]);
+  if (temporaryId !== message.id) {
+    getDb().prepare("DELETE FROM messages WHERE id = ?").run(temporaryId);
+  }
+}
+
 // ─── requests (고객 요청 자동 추출) ──────────────────────────────────────────
 
 interface RequestRow {

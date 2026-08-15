@@ -10,11 +10,12 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const q = (req.nextUrl.searchParams.get("q") || "").trim();
   const chatId = req.nextUrl.searchParams.get("chatId") || undefined;
+  const minimumLength = chatId ? 1 : 2;
 
-  if (q.length < 2) {
+  if (q.length < minimumLength) {
     return NextResponse.json({
       query: q,
-      error: q ? "2글자 이상 입력하세요" : null,
+      error: q ? `${minimumLength}글자 이상 입력하세요` : null,
       messages: [],
       memos: [],
       requests: [],

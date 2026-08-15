@@ -5,6 +5,17 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Chat, Message } from "@/lib/types";
 import { parseKmong } from "@/lib/kmong-parser";
 
+interface ChatSearchHit {
+  id: string;
+  chatId: string;
+  text: string;
+  snippet: string;
+  isFromMe: boolean;
+  senderName?: string;
+  timestamp: string;
+  type: string;
+}
+
 interface Props {
   chat: Chat | null;
   messages: Message[];
@@ -17,7 +28,9 @@ interface Props {
   onRestore?: () => void;
   onBack?: () => void;
   onOpenAI?: () => void;
+  onOpenSettings?: () => void;
   onAttachmentDownloaded?: (messageId: string, filePath: string) => void;
+  onMessageSent?: (message: Message) => void;
 }
 
 function dateKey(iso: string): string {
@@ -107,6 +120,33 @@ function replyPreview(message: Message): string {
   if (reply.type === 3) return "[동영상]";
   if (reply.type === 18) return "[파일]";
   return "[메시지]";
+}
+
+function highlightSearchText(text: string, query: string) {
+  const needle = query.trim();
+  if (!needle) return text;
+  const lowerText = text.toLocaleLowerCase();
+  const lowerNeedle = needle.toLocaleLowerCase();
+  const parts = [];
+  let cursor = 0;
+  let matchIndex = lowerText.indexOf(lowerNeedle);
+
+  while (matchIndex >= 0) {
+    if (matchIndex > cursor) parts.push(text.slice(cursor, matchIndex));
+    parts.push(
+      <mark
+        key={`${matchIndex}-${parts.length}`}
+        className="bg-[#FFE36E] text-[#1A1F36] rounded-sm px-0.5"
+      >
+        {text.slice(matchIndex, matchIndex + needle.length)}
+      </mark>,
+    );
+    cursor = matchIndex + needle.length;
+    matchIndex = lowerText.indexOf(lowerNeedle, cursor);
+  }
+
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts.length > 0 ? parts : text;
 }
 
 async function openLocalFile(path: string): Promise<string | null> {
@@ -376,9 +416,18 @@ export function ChatView({
   onRestore,
   onBack,
   onOpenAI,
+  onOpenSettings,
   onAttachmentDownloaded,
+  onMessageSent,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchComposingRef = useRef(false);
+  const replyInputRef = useRef<HTMLTextAreaElement>(null);
+  const replyComposingRef = useRef(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const searchResultRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const previousChatIdRef = useRef<string | null>(null);
   const previousLastMessageIdRef = useRef<string | null>(null);
   const [rawMode, setRawMode] = useState(false);
@@ -392,8 +441,128 @@ export function ChatView({
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkFailedIds, setBulkFailedIds] = useState<Set<string>>(() => new Set());
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchHits, setSearchHits] = useState<ChatSearchHit[]>([]);
+  const [searchIndex, setSearchIndex] = useState(0);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchTruncated, setSearchTruncated] = useState(false);
+  const [replyInput, setReplyInput] = useState("");
+  const [replySending, setReplySending] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const [replySent, setReplySent] = useState(false);
+  const [sendEnabled, setSendEnabled] = useState(false);
 
   const isManual = !!chat?.id?.startsWith("manual_");
+
+  function openSearch() {
+    setSearchOpen(true);
+    setRawMode(false);
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }
+
+  function closeSearch() {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchAbortRef.current?.abort();
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchHits([]);
+    setSearchIndex(0);
+    setSearchLoading(false);
+    setSearchError(null);
+    setSearchTruncated(false);
+    if (searchInputRef.current) searchInputRef.current.value = "";
+  }
+
+  function handleSearchQuery(value: string) {
+    setSearchQuery(value);
+    setSearchIndex(0);
+    setSearchError(null);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchAbortRef.current?.abort();
+
+    const query = value.trim();
+    if (!query || !chat) {
+      setSearchHits([]);
+      setSearchLoading(false);
+      setSearchTruncated(false);
+      return;
+    }
+
+    setSearchLoading(true);
+    searchTimerRef.current = setTimeout(() => {
+      const controller = new AbortController();
+      searchAbortRef.current = controller;
+      const params = new URLSearchParams({ q: query, chatId: chat.id });
+      fetch(`/api/search?${params.toString()}`, { signal: controller.signal })
+        .then((res) => {
+          if (!res.ok) throw new Error(`검색 요청 실패: ${res.status}`);
+          return res.json();
+        })
+        .then((data: {
+          messages?: ChatSearchHit[];
+          error?: string | null;
+          truncated?: boolean;
+        }) => {
+          setSearchHits(Array.isArray(data.messages) ? data.messages : []);
+          setSearchError(data.error ?? null);
+          setSearchTruncated(!!data.truncated);
+        })
+        .catch((error) => {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          setSearchHits([]);
+          setSearchError(String(error));
+        })
+        .finally(() => {
+          if (searchAbortRef.current === controller) setSearchLoading(false);
+        });
+    }, 180);
+  }
+
+  function moveSearch(direction: 1 | -1) {
+    if (searchHits.length === 0) return;
+    setSearchIndex((current) =>
+      (current + direction + searchHits.length) % searchHits.length,
+    );
+  }
+
+  async function handleReplySend() {
+    const text = replyInputRef.current?.value.trim() ?? "";
+    if (!chat || isManual || replySending || replyComposingRef.current || !text) return;
+    const targetName = chat.member_count === 1
+      ? "나와의 채팅"
+      : chat.display_name || `(멤버 ${chat.member_count}명)`;
+    if (!window.confirm(`${targetName}에 아래 메시지를 전송할까요?\n\n${text}`)) return;
+
+    setReplySending(true);
+    setReplyError(null);
+    setReplySent(false);
+    try {
+      const response = await fetch("/api/send-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: chat.id, text, confirmed: true }),
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        message?: Message;
+      };
+      if (!response.ok || !data.message) {
+        setReplyError(data.error || "메시지 발송 실패");
+        return;
+      }
+      if (replyInputRef.current) replyInputRef.current.value = "";
+      setReplyInput("");
+      setReplySent(true);
+      onMessageSent?.(data.message);
+      setTimeout(() => setReplySent(false), 2000);
+    } catch (error) {
+      setReplyError(String(error));
+    } finally {
+      setReplySending(false);
+    }
+  }
 
   async function handleManualSend(mode: "replace" | "append") {
     if (!chat || !manualInput.trim() || manualSending) return;
@@ -483,7 +652,56 @@ export function ChatView({
     setBulkError(null);
     setBulkFailedIds(new Set());
     setCopied2d(null);
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchHits([]);
+    setSearchIndex(0);
+    setSearchLoading(false);
+    setSearchError(null);
+    setSearchTruncated(false);
+    if (searchInputRef.current) searchInputRef.current.value = "";
+    if (replyInputRef.current) replyInputRef.current.value = "";
+    searchComposingRef.current = false;
+    replyComposingRef.current = false;
+    setReplyInput("");
+    setReplySending(false);
+    setReplyError(null);
+    setReplySent(false);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchAbortRef.current?.abort();
   }, [chat?.id]);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((response) => response.json())
+      .then((settings) => setSendEnabled(settings.send_enabled === "1"))
+      .catch(() => setSendEnabled(false));
+  }, [chat?.id]);
+
+  useEffect(() => {
+    function handleFindShortcut(event: KeyboardEvent) {
+      if (!chat || event.key.toLocaleLowerCase() !== "f") return;
+      if (!event.metaKey && !event.ctrlKey) return;
+      event.preventDefault();
+      openSearch();
+    }
+    window.addEventListener("keydown", handleFindShortcut);
+    return () => window.removeEventListener("keydown", handleFindShortcut);
+  }, [chat]);
+
+  useEffect(() => {
+    const active = searchHits[searchIndex];
+    if (!active) return;
+    searchResultRefs.current.get(active.id)?.scrollIntoView({
+      block: "center",
+      behavior: "smooth",
+    });
+  }, [searchHits, searchIndex]);
+
+  useEffect(() => () => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchAbortRef.current?.abort();
+  }, []);
 
   async function handleCopy() {
     const text = toPlainText(messages);
@@ -654,6 +872,21 @@ export function ChatView({
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
           </button>
+          <button
+            onClick={openSearch}
+            className={`p-2 md:p-0 transition-colors ${
+              searchOpen
+                ? "text-[#2959AA]"
+                : "text-[#6B7280] hover:text-[#1A1F36]"
+            }`}
+            title="현재 채팅 검색"
+            aria-label="현재 채팅 검색"
+          >
+            <svg className="w-5 h-5 md:w-3.5 md:h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <circle cx="11" cy="11" r="7" />
+              <path strokeLinecap="round" d="m20 20-3.5-3.5" />
+            </svg>
+          </button>
           {downloadableMessages.length > 0 && (
             <button
               onClick={handleDownloadAll}
@@ -727,6 +960,85 @@ export function ChatView({
         </div>
       </div>
 
+      {searchOpen && (
+        <div className="shrink-0 border-b border-[#D6D8DF] bg-white px-3 py-2">
+          <div className="flex items-center gap-1.5">
+            <div className="relative flex-1 min-w-0">
+              <svg
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9CA3AF] pointer-events-none"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <circle cx="11" cy="11" r="7" />
+                <path strokeLinecap="round" d="m20 20-3.5-3.5" />
+              </svg>
+              <input
+                ref={searchInputRef}
+                type="text"
+                defaultValue=""
+                onChange={(event) => {
+                  if (!searchComposingRef.current) {
+                    handleSearchQuery(event.target.value);
+                  }
+                }}
+                onCompositionStart={() => { searchComposingRef.current = true; }}
+                onCompositionEnd={(event) => {
+                  searchComposingRef.current = false;
+                  handleSearchQuery(event.currentTarget.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") closeSearch();
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    moveSearch(event.shiftKey ? -1 : 1);
+                  }
+                }}
+                placeholder="현재 채팅 내용 검색"
+                className="w-full h-8 pl-8 pr-3 text-xs text-[#1A1F36] bg-[#F5F6F8] border border-[#D6D8DF] rounded focus:outline-none focus:border-[#2959AA]"
+              />
+            </div>
+            <span className="min-w-[48px] text-center text-[10px] text-[#6B7280] tabular-nums">
+              {searchLoading
+                ? "검색 중"
+                : searchHits.length > 0
+                  ? `${searchIndex + 1}/${searchHits.length}${searchTruncated ? "+" : ""}`
+                  : "0/0"}
+            </span>
+            <button
+              onClick={() => moveSearch(-1)}
+              disabled={searchHits.length === 0}
+              className="w-7 h-7 grid place-items-center rounded text-[#6B7280] hover:bg-[#E8E9EC] disabled:text-[#C7CAD3]"
+              title="이전 결과"
+              aria-label="이전 검색 결과"
+            >
+              ↑
+            </button>
+            <button
+              onClick={() => moveSearch(1)}
+              disabled={searchHits.length === 0}
+              className="w-7 h-7 grid place-items-center rounded text-[#6B7280] hover:bg-[#E8E9EC] disabled:text-[#C7CAD3]"
+              title="다음 결과"
+              aria-label="다음 검색 결과"
+            >
+              ↓
+            </button>
+            <button
+              onClick={closeSearch}
+              className="w-7 h-7 grid place-items-center rounded text-[#6B7280] hover:bg-[#E8E9EC]"
+              title="검색 닫기"
+              aria-label="검색 닫기"
+            >
+              ×
+            </button>
+          </div>
+          {searchError && (
+            <div className="mt-1 text-[10px] text-[#B23434]">{searchError}</div>
+          )}
+        </div>
+      )}
+
       {/* 메시지 스크롤 영역 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         {!loading && hasOlderMessages && (
@@ -740,7 +1052,44 @@ export function ChatView({
             </button>
           </div>
         )}
-        {loading ? (
+        {searchOpen && searchQuery.trim() ? (
+          searchLoading && searchHits.length === 0 ? (
+            <div className="text-center text-[#6B7280] text-xs py-8">검색 중...</div>
+          ) : searchHits.length === 0 ? (
+            <div className="text-center text-[#6B7280] text-xs py-8">검색 결과가 없습니다</div>
+          ) : (
+            <div className="px-3 py-3 space-y-1.5">
+              {searchHits.map((hit, index) => (
+                <button
+                  key={hit.id}
+                  ref={(element) => {
+                    if (element) searchResultRefs.current.set(hit.id, element);
+                    else searchResultRefs.current.delete(hit.id);
+                  }}
+                  onClick={() => setSearchIndex(index)}
+                  className={`w-full text-left px-3 py-2 rounded border transition-colors ${
+                    index === searchIndex
+                      ? "bg-[#EEF4FF] border-[#2959AA]"
+                      : "bg-white border-[#D6D8DF] hover:border-[#9CA3AF]"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 text-[10px] text-[#6B7280]">
+                    <span className={hit.isFromMe ? "text-[#2959AA]" : "text-[#B23434]"}>
+                      {hit.isFromMe ? "나" : hit.senderName || "상대"}
+                    </span>
+                    <span>{new Date(hit.timestamp).toLocaleString("ko-KR")}</span>
+                    {index === searchIndex && (
+                      <span className="ml-auto text-[#2959AA]">선택됨</span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-[#1A1F36] whitespace-pre-wrap break-words select-text cursor-text">
+                    {highlightSearchText(hit.text || `[${hit.type}]`, searchQuery)}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )
+        ) : loading ? (
           <div className="text-center text-[#6B7280] text-xs py-8">
             <div className="inline-block w-5 h-5 border-2 border-[#D6D8DF] border-t-[#2959AA] rounded-full animate-spin mb-2" />
             <div>메시지 로딩 중...</div>
@@ -861,6 +1210,68 @@ export function ChatView({
           </div>
         )}
       </div>
+
+      {!isManual && (
+        <div className="shrink-0 border-t border-[#D6D8DF] bg-white px-3 py-2">
+          {replyError && (
+            <div className="mb-1.5 text-[10px] text-[#B23434]">{replyError}</div>
+          )}
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={replyInputRef}
+              defaultValue=""
+              onChange={(event) => {
+                if (replyComposingRef.current) return;
+                setReplyInput(event.target.value);
+                setReplyError(null);
+                setReplySent(false);
+              }}
+              onCompositionStart={() => { replyComposingRef.current = true; }}
+              onCompositionEnd={(event) => {
+                replyComposingRef.current = false;
+                setReplyInput(event.currentTarget.value);
+                setReplyError(null);
+                setReplySent(false);
+              }}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter"
+                  && (event.metaKey || event.ctrlKey)
+                  && !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault();
+                  void handleReplySend();
+                }
+              }}
+              rows={2}
+              placeholder={chat.member_count === 1 ? "나와의 채팅에 메시지 입력" : "카카오톡 답변 입력"}
+              className="flex-1 min-w-0 max-h-32 resize-none rounded border border-[#D6D8DF] bg-[#F5F6F8] px-3 py-2 text-sm leading-5 text-[#1A1F36] placeholder:text-[#9CA3AF] focus:bg-white focus:outline-none focus:border-[#2959AA]"
+              disabled={replySending}
+            />
+            {sendEnabled ? (
+              <button
+                onClick={() => void handleReplySend()}
+                disabled={replySending || !replyInput.trim()}
+                className={`h-10 shrink-0 px-4 rounded text-xs font-medium text-white transition-colors disabled:bg-[#9CA3AF] ${
+                  replySent
+                    ? "bg-green-600"
+                    : "bg-[#2959AA] hover:bg-[#1F4485]"
+                }`}
+              >
+                {replySending ? "전송 중" : replySent ? "전송됨" : "전송"}
+              </button>
+            ) : (
+              <button
+                onClick={onOpenSettings}
+                className="h-10 shrink-0 px-3 rounded text-xs font-medium bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
+                title="설정에서 카톡 자동발송 활성화"
+              >
+                발송 설정
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 임의 생성 채팅(manual_*) 전용 하단 입력창 — Claude로 파싱하여 메시지로 변환 */}
       {isManual && (

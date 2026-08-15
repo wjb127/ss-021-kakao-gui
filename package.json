@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3033",
-    "build": "next build",
+    "dev": "./scripts/build-kakao-send-helper.sh && next dev -p 3033",
+    "build": "./scripts/build-kakao-send-helper.sh && next build",
     "start": "next start -p 3032",
     "lint": "eslint",
     "local:app": "./scripts/build-macos-app.sh",

@@ -305,6 +305,9 @@ export function ChatList({
 }: Props) {
   // 채팅방 이름 검색 (컴포넌트 내부 상태 — 상위 페이지 영향 없음)
   const [query, setQuery] = useState("");
+  const [queryInput, setQueryInput] = useState("");
+  const queryInputRef = useRef<HTMLInputElement>(null);
+  const composingRef = useRef(false);
 
   const filtered = useMemo(() => {
     const byCategory =
@@ -458,12 +461,25 @@ export function ChatList({
         {/* 이름 검색 */}
         <div className="relative mt-2">
           <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            ref={queryInputRef}
+            type="text"
+            defaultValue=""
+            onChange={(event) => {
+              if (composingRef.current) return;
+              setQueryInput(event.target.value);
+              setQuery(event.target.value);
+            }}
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={(event) => {
+              composingRef.current = false;
+              setQueryInput(event.currentTarget.value);
+              setQuery(event.currentTarget.value);
+            }}
             placeholder="채팅방 이름 검색"
             aria-label="채팅방 이름 검색"
-            className="w-full text-sm md:text-xs pl-7 pr-14 py-2 md:py-1.5 rounded border border-[#D6D8DF] bg-[#F7F8FA] text-[#1A1F36] placeholder:text-[#9AA0AE] focus:outline-none focus:border-[#2959AA]"
+            spellCheck={false}
+            autoCorrect="off"
+            className="w-full h-10 md:h-8 text-sm md:text-xs leading-none pl-8 pr-24 rounded border border-[#D6D8DF] bg-[#F7F8FA] text-[#1A1F36] placeholder:text-[#9AA0AE] focus:outline-none focus:border-[#2959AA]"
           />
           <svg
             className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9AA0AE] pointer-events-none"
@@ -471,8 +487,24 @@ export function ChatList({
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
           </svg>
+          {queryInput && (
+            <button
+              type="button"
+              onClick={() => {
+                if (queryInputRef.current) queryInputRef.current.value = "";
+                setQueryInput("");
+                setQuery("");
+                queryInputRef.current?.focus();
+              }}
+              title="검색어 지우기"
+              aria-label="검색어 지우기"
+              className="absolute right-[70px] top-1/2 -translate-y-1/2 w-6 h-6 grid place-items-center text-[#6B7280] hover:text-[#1A1F36]"
+            >
+              ×
+            </button>
+          )}
           <a
-            href={`/search${query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ""}`}
+            href={`/search${queryInput.trim() ? `?q=${encodeURIComponent(queryInput.trim())}` : ""}`}
             title="메시지 내용까지 검색"
             className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] px-1.5 py-0.5 rounded bg-[#E8E9EC] text-[#2959AA] hover:bg-[#D6D8DF] transition-colors"
           >

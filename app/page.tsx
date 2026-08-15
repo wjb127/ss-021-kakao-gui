@@ -521,6 +521,29 @@ export default function Home() {
             onRestore={selectedChat ? () => setRestoreChatId(selectedChat.id) : undefined}
             onBack={handleBack}
             onOpenAI={() => setMobileAIOpen(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onMessageSent={(message) => {
+              setMessages((previous) => {
+                const next = mergeMessages(previous, [message]);
+                if (selectedChatId) {
+                  const cached = messageCacheRef.current.get(selectedChatId);
+                  if (cached) {
+                    setCachedChat(messageCacheRef.current, selectedChatId, {
+                      ...cached,
+                      messages: next,
+                      total: Math.max(cached.total, next.length),
+                    });
+                  }
+                }
+                return next;
+              });
+              setMessageTotal((total) => total + 1);
+              setChats((previous) => previous.map((item) =>
+                item.id === message.chat_id
+                  ? { ...item, last_message_at: message.timestamp }
+                  : item,
+              ));
+            }}
             onAttachmentDownloaded={(messageId, filePath) => {
               setMessages((prev) => {
                 const next = prev.map((m) =>

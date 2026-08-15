@@ -45,6 +45,9 @@ if [ ! -d "$PROJECT_DIR/node_modules" ]; then
   pnpm install --frozen-lockfile
 fi
 
+# 발송 시 Swift 컴파일 지연이 생기지 않도록 시작 전에 헬퍼를 준비한다.
+"$PROJECT_DIR/scripts/build-kakao-send-helper.sh" >/dev/null
+
 # 다른 프로세스를 임의로 종료하지 않고 포트 충돌을 명시적으로 기록한다.
 if command -v lsof >/dev/null 2>&1; then
   if port_pids="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN)"; then

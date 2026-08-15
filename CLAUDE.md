@@ -42,7 +42,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 문의 분석 (`/api/analyze`): **OpenAI** (`OPENAI_MODEL`, 기본 `gpt-4.1`), JSON 모드로 summary/urgency/todos/nextAction → `analyses` 테이블 저장.
 - 답변 초안 (`/api/draft-reply`): **Anthropic** (`claude-opus-4-5`), 톤(formal/casual/brief) + 고객 메모 컨텍스트로 카톡 답변 1건 생성.
 
-**카톡 자동발송** (`lib/kakao-sender.ts`, `/api/send-message`). AppleScript + 클립보드(pbcopy) 방식 — 카톡 mac 앱이 **frontmost이고 입력란 포커스**된 상태여야 함 (강제 activate 안 함). 이중 안전장치: 설정 `send_enabled === "1"` + 요청 `confirmed === true` 둘 다 필요. 발송 성공 시 보낸 메시지를 캐시에 own 메시지로 누적.
+**카톡 자동발송** (`lib/kakao-sender.ts`, `scripts/kakao-send.swift`, `/api/send-message`). 프로젝트 전용 macOS 접근성 헬퍼를 앱 시작 전에 `~/.kakaocli/bin/kakao-send`로 컴파일하고, 선택한 채팅방 이름을 정확히 찾아 발송한다. 멤버 1명 채팅은 이름 대신 `badge me` 표식으로 나와의 채팅을 지정한다. 이중 안전장치: 설정 `send_enabled === "1"` + 요청 `confirmed === true` 둘 다 필요. 화면에는 임시 own 메시지를 즉시 누적하고, 실제 카카오 메시지 ID 확인과 캐시 교체는 Next `after()`에서 응답 이후 처리한다.
 
 **Claude Code 원격 실행** (`/api/claude-trigger` → `lib/claude-runner.ts`). 채팅에 매핑된 프로젝트 경로(`project_paths`)에 `KAKAO_CONTEXT.md`(대화+메모+분석, `lib/context-export.ts`)를 써넣고 → 그 cwd에서 `claude -p <prompt>` 백그라운드 spawn → stdout/stderr를 `claude_runs` 테이블에 실시간 누적. 10분 hard timeout. `claude_skip_permissions` 설정 시 `--dangerously-skip-permissions` 추가. 바이너리는 `CLAUDE_BIN`(기본 `claude`).
 
