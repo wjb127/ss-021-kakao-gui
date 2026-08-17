@@ -12,6 +12,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     private let maxRetryCount = 30
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // macOS 는 Cmd+C/V/X/A 를 "Edit 메뉴의 key equivalent"로 전달한다.
+        // 메뉴바가 없으면 단축키가 앱에 도달조차 못 해서 웹뷰에서 드래그 선택 후 복사가 안 된다.
+        // (텍스트 뷰의 '복사' 버튼은 navigator.clipboard 라서 메뉴 없이도 동작 → 증상이 부분적으로 보였음)
+        installMainMenu()
+
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
 
@@ -37,6 +42,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
         showStatus("카카오 인박스를 시작하는 중입니다.")
         ensureServer()
+    }
+
+    /// 표준 메뉴바 구성. 항목의 action 은 responder chain 으로 전달되어 WKWebView 가 처리한다.
+    private func installMainMenu() {
+        let appName = "카카오 인박스"
+        let mainMenu = NSMenu()
+
+        // ── 앱 메뉴 ──
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "\(appName) 정보", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "\(appName) 가리기", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = NSMenuItem(title: "다른 항목 가리기", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthers)
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "\(appName) 종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+
+        // ── 편집 메뉴 (이게 없으면 Cmd+C 가 동작하지 않는다) ──
+        let editItem = NSMenuItem()
+        let editMenu = NSMenu(title: "편집")
+        editMenu.addItem(withTitle: "실행 취소", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = NSMenuItem(title: "다시 실행", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redo)
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "잘라내기", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "복사", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "붙여넣기", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "전체 선택", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+
+        // ── 보기 메뉴 ──
+        let viewItem = NSMenuItem()
+        let viewMenu = NSMenu(title: "보기")
+        viewMenu.addItem(withTitle: "새로고침", action: #selector(reloadPage), keyEquivalent: "r")
+        let fullScreen = NSMenuItem(title: "전체 화면", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        fullScreen.keyEquivalentModifierMask = [.command, .control]
+        viewMenu.addItem(fullScreen)
+        viewItem.submenu = viewMenu
+        mainMenu.addItem(viewItem)
+
+        // ── 윈도우 메뉴 ──
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "윈도우")
+        windowMenu.addItem(withTitle: "최소화", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "닫기", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
+
+        NSApp.mainMenu = mainMenu
+        NSApp.windowsMenu = windowMenu
+    }
+
+    @objc private func reloadPage() {
+        webView?.reload()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
