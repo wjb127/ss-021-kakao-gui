@@ -443,6 +443,53 @@ export function getCachedMessagePage(
   };
 }
 
+// 검색 결과로 이동할 때 대상 메시지 전후 맥락을 함께 반환한다.
+export function getCachedMessageContext(
+  chatId: string,
+  messageId: string,
+  radius = 60,
+): Message[] {
+  const db = getDb();
+  const contextRadius = Math.max(20, Math.min(radius, 150));
+  const target = db
+    .prepare("SELECT * FROM messages WHERE chat_id = ? AND id = ?")
+    .get(chatId, messageId) as MessageRow | undefined;
+  if (!target) return [];
+
+  const before = db.prepare(
+    `SELECT * FROM messages
+     WHERE chat_id = ?
+       AND (timestamp < ? OR (timestamp = ? AND id < ?))
+     ORDER BY timestamp DESC, id DESC
+     LIMIT ?`,
+  ).all(
+    chatId,
+    target.timestamp,
+    target.timestamp,
+    target.id,
+    contextRadius,
+  ) as MessageRow[];
+  const after = db.prepare(
+    `SELECT * FROM messages
+     WHERE chat_id = ?
+       AND (timestamp > ? OR (timestamp = ? AND id > ?))
+     ORDER BY timestamp ASC, id ASC
+     LIMIT ?`,
+  ).all(
+    chatId,
+    target.timestamp,
+    target.timestamp,
+    target.id,
+    contextRadius,
+  ) as MessageRow[];
+
+  return [
+    ...before.reverse(),
+    target,
+    ...after,
+  ].map(rowToMessage);
+}
+
 // 특정 채팅의 모든 메시지 삭제 (새로파싱 모드용)
 export function deleteMessagesForChat(chatId: string): void {
   const db = getDb();

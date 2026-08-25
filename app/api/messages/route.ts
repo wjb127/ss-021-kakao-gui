@@ -5,6 +5,7 @@ import { enrichCachedMessages, listMessages } from "@/lib/kakaocli";
 import { normalizeKakaoEvents } from "@/lib/kakao-events";
 import {
   getCachedMessageCount,
+  getCachedMessageContext,
   getCachedMessagePage,
   getCachedMessages,
   upsertMessages,
@@ -46,6 +47,27 @@ export async function GET(req: NextRequest) {
   }
   const { paginated, limit, before } = parsePageOptions(req);
   const shouldSync = req.nextUrl.searchParams.get("sync") !== "0";
+  const aroundMessageId = req.nextUrl.searchParams.get("aroundMessageId");
+
+  if (aroundMessageId) {
+    const radiusValue = Number.parseInt(
+      req.nextUrl.searchParams.get("radius") || "",
+      10,
+    );
+    const radius = Number.isFinite(radiusValue) ? radiusValue : 60;
+    const context = getCachedMessageContext(chatId, aroundMessageId, radius);
+    if (context.length === 0) {
+      return NextResponse.json(
+        { error: "검색한 메시지를 찾을 수 없음" },
+        { status: 404 },
+      );
+    }
+    return NextResponse.json({
+      messages: normalizeKakaoEvents(context),
+      targetId: aroundMessageId,
+      total: getCachedMessageCount(chatId),
+    });
+  }
 
   // manual chat은 kakaocli 호출 없이 캐시만 반환
   if (chatId.startsWith("manual_")) {

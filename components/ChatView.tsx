@@ -16,6 +16,12 @@ interface ChatSearchHit {
   type: string;
 }
 
+interface SearchContextState {
+  targetId: string | null;
+  messages: Message[];
+  error: string | null;
+}
+
 interface Props {
   chat: Chat | null;
   messages: Message[];
@@ -427,7 +433,8 @@ export function ChatView({
   const replyComposingRef = useRef(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
-  const searchResultRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const searchContextAbortRef = useRef<AbortController | null>(null);
+  const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const previousChatIdRef = useRef<string | null>(null);
   const previousLastMessageIdRef = useRef<string | null>(null);
   const [rawMode, setRawMode] = useState(false);
@@ -448,6 +455,11 @@ export function ChatView({
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchTruncated, setSearchTruncated] = useState(false);
+  const [searchContext, setSearchContext] = useState<SearchContextState>({
+    targetId: null,
+    messages: [],
+    error: null,
+  });
   const [replyInput, setReplyInput] = useState("");
   const [replySending, setReplySending] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
@@ -465,6 +477,7 @@ export function ChatView({
   function closeSearch() {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchAbortRef.current?.abort();
+    searchContextAbortRef.current?.abort();
     setSearchOpen(false);
     setSearchQuery("");
     setSearchHits([]);
@@ -481,6 +494,7 @@ export function ChatView({
     setSearchError(null);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchAbortRef.current?.abort();
+    searchContextAbortRef.current?.abort();
 
     const query = value.trim();
     if (!query || !chat) {
@@ -505,7 +519,11 @@ export function ChatView({
           error?: string | null;
           truncated?: boolean;
         }) => {
-          setSearchHits(Array.isArray(data.messages) ? data.messages : []);
+          const hits = Array.isArray(data.messages) ? data.messages : [];
+          setSearchHits([...hits].sort((a, b) =>
+            a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id),
+          ));
+          setSearchIndex(0);
           setSearchError(data.error ?? null);
           setSearchTruncated(!!data.truncated);
         })
@@ -615,6 +633,29 @@ export function ChatView({
   const sorted = [...messages].sort((a, b) =>
     a.timestamp.localeCompare(b.timestamp),
   );
+  const activeSearchHit = searchHits[searchIndex] ?? null;
+  const searchContextMessages = searchContext.messages;
+  const searchContextError = searchContext.targetId === activeSearchHit?.id
+    ? searchContext.error
+    : null;
+  const activeHitIsAvailable = !!activeSearchHit && (
+    messages.some((message) => message.id === activeSearchHit.id)
+    || searchContextMessages.some((message) => message.id === activeSearchHit.id)
+  );
+  const searchContextLoading = !!activeSearchHit
+    && !activeHitIsAvailable
+    && searchContext.targetId !== activeSearchHit.id;
+  const visibleMessagesById = new Map<string, Message>();
+  for (const message of searchContextMessages) {
+    visibleMessagesById.set(message.id, message);
+  }
+  for (const message of sorted) {
+    visibleMessagesById.set(message.id, message);
+  }
+  const visibleMessages = [...visibleMessagesById.values()].sort((a, b) =>
+    a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id),
+  );
+  const searchTerm = searchOpen ? searchQuery.trim() : "";
   const mediaMessages = sorted.filter(isMediaMessage);
   const downloadedMediaCount = mediaMessages.filter((m) => !!m.localFilePath).length;
   const downloadableMessages = mediaMessages
@@ -659,6 +700,7 @@ export function ChatView({
     setSearchLoading(false);
     setSearchError(null);
     setSearchTruncated(false);
+    setSearchContext({ targetId: null, messages: [], error: null });
     if (searchInputRef.current) searchInputRef.current.value = "";
     if (replyInputRef.current) replyInputRef.current.value = "";
     searchComposingRef.current = false;
@@ -669,6 +711,7 @@ export function ChatView({
     setReplySent(false);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchAbortRef.current?.abort();
+    searchContextAbortRef.current?.abort();
   }, [chat?.id]);
 
   useEffect(() => {
@@ -690,17 +733,56 @@ export function ChatView({
   }, [chat]);
 
   useEffect(() => {
-    const active = searchHits[searchIndex];
-    if (!active) return;
-    searchResultRefs.current.get(active.id)?.scrollIntoView({
-      block: "center",
-      behavior: "smooth",
+    searchContextAbortRef.current?.abort();
+    if (!chat || !activeSearchHit || activeHitIsAvailable) return;
+
+    const controller = new AbortController();
+    searchContextAbortRef.current = controller;
+    const params = new URLSearchParams({
+      chatId: chat.id,
+      aroundMessageId: activeSearchHit.id,
+      radius: "60",
+      sync: "0",
     });
-  }, [searchHits, searchIndex]);
+    fetch(`/api/messages?${params.toString()}`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`검색 위치 요청 실패: ${response.status}`);
+        return response.json();
+      })
+      .then((data: { messages?: Message[]; error?: string }) => {
+        setSearchContext({
+          targetId: activeSearchHit.id,
+          messages: Array.isArray(data.messages) ? data.messages : [],
+          error: data.error ?? null,
+        });
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setSearchContext({
+          targetId: activeSearchHit.id,
+          messages: [],
+          error: String(error),
+        });
+      });
+
+    return () => controller.abort();
+  }, [activeHitIsAvailable, activeSearchHit, chat]);
+
+  useLayoutEffect(() => {
+    if (!activeSearchHit) return;
+    const frame = requestAnimationFrame(() => {
+      messageRefs.current.get(activeSearchHit.id)?.scrollIntoView({
+        block: "center",
+        behavior: "auto",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeSearchHit, searchContextMessages]);
 
   useEffect(() => () => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchAbortRef.current?.abort();
+    searchContextAbortRef.current?.abort();
   }, []);
 
   async function handleCopy() {
@@ -908,12 +990,19 @@ export function ChatView({
           {/* 텍스트 뷰 토글 — 데스크탑 전용 */}
           <button
             onClick={() => setRawMode((v) => !v)}
+            disabled={searchOpen}
             className={`hidden md:inline-flex text-[11px] px-2 py-1 rounded transition-colors ${
               rawMode
                 ? "bg-yellow-400 text-yellow-900"
-                : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
+                : searchOpen
+                  ? "bg-[#F5F6F8] text-[#9CA3AF] cursor-not-allowed"
+                  : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
             }`}
-            title="텍스트 뷰 (드래그 선택용)"
+            title={
+              searchOpen
+                ? "검색 중에는 말풍선 위치로 이동합니다"
+                : "텍스트 뷰 (드래그 선택용)"
+            }
           >
             텍스트
           </button>
@@ -1036,6 +1125,15 @@ export function ChatView({
           {searchError && (
             <div className="mt-1 text-[10px] text-[#B23434]">{searchError}</div>
           )}
+          {searchTerm && !searchLoading && searchHits.length === 0 && !searchError && (
+            <div className="mt-1 text-[10px] text-[#6B7280]">검색 결과 없음</div>
+          )}
+          {searchContextLoading && (
+            <div className="mt-1 text-[10px] text-[#6B7280]">검색 위치 불러오는 중…</div>
+          )}
+          {searchContextError && (
+            <div className="mt-1 text-[10px] text-[#B23434]">{searchContextError}</div>
+          )}
         </div>
       )}
 
@@ -1052,49 +1150,12 @@ export function ChatView({
             </button>
           </div>
         )}
-        {searchOpen && searchQuery.trim() ? (
-          searchLoading && searchHits.length === 0 ? (
-            <div className="text-center text-[#6B7280] text-xs py-8">검색 중...</div>
-          ) : searchHits.length === 0 ? (
-            <div className="text-center text-[#6B7280] text-xs py-8">검색 결과가 없습니다</div>
-          ) : (
-            <div className="px-3 py-3 space-y-1.5">
-              {searchHits.map((hit, index) => (
-                <button
-                  key={hit.id}
-                  ref={(element) => {
-                    if (element) searchResultRefs.current.set(hit.id, element);
-                    else searchResultRefs.current.delete(hit.id);
-                  }}
-                  onClick={() => setSearchIndex(index)}
-                  className={`w-full text-left px-3 py-2 rounded border transition-colors ${
-                    index === searchIndex
-                      ? "bg-[#EEF4FF] border-[#2959AA]"
-                      : "bg-white border-[#D6D8DF] hover:border-[#9CA3AF]"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 text-[10px] text-[#6B7280]">
-                    <span className={hit.isFromMe ? "text-[#2959AA]" : "text-[#B23434]"}>
-                      {hit.isFromMe ? "나" : hit.senderName || "상대"}
-                    </span>
-                    <span>{new Date(hit.timestamp).toLocaleString("ko-KR")}</span>
-                    {index === searchIndex && (
-                      <span className="ml-auto text-[#2959AA]">선택됨</span>
-                    )}
-                  </div>
-                  <div className="mt-1 text-xs leading-5 text-[#1A1F36] whitespace-pre-wrap break-words select-text cursor-text">
-                    {highlightSearchText(hit.text || `[${hit.type}]`, searchQuery)}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )
-        ) : loading ? (
+        {loading ? (
           <div className="text-center text-[#6B7280] text-xs py-8">
             <div className="inline-block w-5 h-5 border-2 border-[#D6D8DF] border-t-[#2959AA] rounded-full animate-spin mb-2" />
             <div>메시지 로딩 중...</div>
           </div>
-        ) : sorted.length === 0 ? (
+        ) : visibleMessages.length === 0 ? (
           <div className="text-center text-[#6B7280] text-xs py-8">
             메시지가 없습니다
           </div>
@@ -1106,11 +1167,12 @@ export function ChatView({
         ) : (
           /* 말풍선 뷰 */
           <div className="px-4 py-3 space-y-2">
-            {sorted.map((m, i) => {
-              const prev = i > 0 ? sorted[i - 1] : null;
+            {visibleMessages.map((m, i) => {
+              const prev = i > 0 ? visibleMessages[i - 1] : null;
               const showDate =
                 !prev || dateKey(prev.timestamp) !== dateKey(m.timestamp);
               const isSystem = m.type === "system";
+              const isActiveSearchResult = activeSearchHit?.id === m.id;
               const showSender =
                 !m.is_from_me &&
                 !isSystem &&
@@ -1119,7 +1181,14 @@ export function ChatView({
                   prev.is_from_me !== m.is_from_me);
 
               return (
-                <div key={m.id}>
+                <div
+                  key={m.id}
+                  ref={(element) => {
+                    if (element) messageRefs.current.set(m.id, element);
+                    else messageRefs.current.delete(m.id);
+                  }}
+                  data-message-id={m.id}
+                >
                   {/* 날짜 구분선 */}
                   {showDate && (
                     <div className="text-center my-3">
@@ -1131,8 +1200,12 @@ export function ChatView({
                   {/* 시스템 메시지 */}
                   {isSystem ? (
                     <div className="text-center my-1">
-                      <span className="text-[10px] text-[#9CA3AF]">
-                        {m.text || `[${m.type}]`}
+                      <span className={`inline-block text-[10px] text-[#9CA3AF] rounded px-1 ${
+                        isActiveSearchResult ? "ring-2 ring-[#F2C94C] bg-[#FFF8D6]" : ""
+                      }`}>
+                        {searchTerm
+                          ? highlightSearchText(m.text || `[${m.type}]`, searchTerm)
+                          : m.text || `[${m.type}]`}
                       </span>
                     </div>
                   ) : (
@@ -1154,6 +1227,10 @@ export function ChatView({
                             m.is_from_me
                               ? "bg-[#2959AA] text-white rounded-br-sm"
                               : "bg-white text-[#1A1F36] border border-gray-200 rounded-bl-sm"
+                          } ${
+                            isActiveSearchResult
+                              ? "ring-2 ring-[#F2C94C] ring-offset-2 ring-offset-[#F5F6F8]"
+                              : ""
                           }`}
                         >
                           {m.is_deleted && (
@@ -1188,6 +1265,8 @@ export function ChatView({
                                 isFromMe={m.is_from_me}
                                 onDownloaded={onAttachmentDownloaded}
                               />
+                            ) : searchTerm ? (
+                              highlightSearchText(m.text || `[${m.type}]`, searchTerm)
                             ) : (m.text || `[${m.type}]`)}
                           </div>
                           {/* 타임스탬프 */}
