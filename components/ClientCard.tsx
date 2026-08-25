@@ -4,6 +4,7 @@
 // — 분석 / 메모 / 연동 한 카드에 통합
 import { useEffect, useRef, useState } from "react";
 import type { Analysis, Chat, Urgency } from "@/lib/types";
+import { AI_ANALYSIS_ENABLED } from "@/lib/feature-flags";
 import { ClaudeRunModal } from "./ClaudeRunModal";
 
 const URGENCY_STYLE: Record<Urgency, string> = {
@@ -312,10 +313,16 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
                   <span className="text-[10px] font-medium text-[#6B7280]">AI 분석</span>
                   <button
                     onClick={runAnalyze}
-                    disabled={analyzing}
+                    disabled={!AI_ANALYSIS_ENABLED || analyzing}
                     className="text-[10px] px-2 py-0.5 rounded bg-[#2959AA] hover:bg-[#1D3F7A] text-white disabled:bg-[#9CA3AF] transition-colors"
                   >
-                    {analyzing ? "…" : analysis ? "재분석" : "분석"}
+                    {!AI_ANALYSIS_ENABLED
+                      ? "비활성"
+                      : analyzing
+                        ? "…"
+                        : analysis
+                          ? "재분석"
+                          : "분석"}
                   </button>
                 </div>
                 {analyzeError && (

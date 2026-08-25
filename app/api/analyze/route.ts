@@ -6,6 +6,7 @@ import { listMessages } from "@/lib/kakaocli";
 import { setTodoForChat, getCachedMessages } from "@/lib/store";
 import type { Analysis, Message, Urgency } from "@/lib/types";
 import { formatReplyContext } from "@/lib/message-format";
+import { AI_ANALYSIS_ENABLED } from "@/lib/feature-flags";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -40,6 +41,13 @@ function buildConversationDump(messages: Message[]): string {
 }
 
 export async function POST(req: NextRequest) {
+  if (!AI_ANALYSIS_ENABLED) {
+    return NextResponse.json(
+      { error: "AI 분석 기능이 비활성화됨" },
+      { status: 403 },
+    );
+  }
+
   try {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {

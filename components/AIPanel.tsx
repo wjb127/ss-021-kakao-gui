@@ -3,6 +3,7 @@
 // AI 분석 패널 - 우측
 import { useEffect, useRef, useState } from "react";
 import type { Analysis, Chat, Urgency } from "@/lib/types";
+import { AI_ANALYSIS_ENABLED } from "@/lib/feature-flags";
 import { ClaudeRunModal } from "./ClaudeRunModal";
 
 interface Props {
@@ -397,9 +398,10 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
             {!analysis && !loading && (
               <button
                 onClick={runAnalyze}
-                className="w-full py-2 bg-[#2959AA] hover:bg-[#1D3F7A] text-white text-sm rounded transition-colors"
+                disabled={!AI_ANALYSIS_ENABLED}
+                className="w-full py-2 bg-[#2959AA] hover:bg-[#1D3F7A] text-white text-sm rounded transition-colors disabled:bg-[#D6D8DF] disabled:text-[#6B7280] disabled:cursor-not-allowed"
               >
-                AI 분석하기
+                {AI_ANALYSIS_ENABLED ? "AI 분석하기" : "AI 분석 비활성화됨"}
               </button>
             )}
             {loading && (
@@ -464,9 +466,10 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
                   <span className="text-[10px] text-[#9CA3AF]">{formatTimestamp(analysis.analyzedAt)}</span>
                   <button
                     onClick={runAnalyze}
-                    className="text-[10px] px-2 py-1 bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36] rounded transition-colors"
+                    disabled={!AI_ANALYSIS_ENABLED}
+                    className="text-[10px] px-2 py-1 bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36] rounded transition-colors disabled:text-[#9CA3AF] disabled:cursor-not-allowed"
                   >
-                    재분석
+                    {AI_ANALYSIS_ENABLED ? "재분석" : "비활성"}
                   </button>
                 </div>
               </>

@@ -21,6 +21,7 @@ import {
 } from "./store";
 import type { Message, RequestKind } from "./types";
 import { formatReplyContext } from "./message-format";
+import { AI_ANALYSIS_ENABLED } from "./feature-flags";
 
 // 마지막 메시지 후 이 시간만큼 조용하면 추출 (연타 묶기)
 const DEBOUNCE_MS = 3 * 60 * 1000;
@@ -137,6 +138,10 @@ export async function extractRequestsForChat(
   chatId: string,
   opts?: { force?: boolean },
 ): Promise<ExtractResult> {
+  if (!isExtractEnabled()) {
+    return { ok: false, reason: "요청 자동 추출 비활성화됨" };
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return { ok: false, reason: "OPENAI_API_KEY 미설정" };
 
@@ -254,5 +259,5 @@ export async function extractRequestsForChat(
 
 // 워커에서 호출 — 추출 기능이 켜져 있는지
 export function isExtractEnabled(): boolean {
-  return getSetting("extract_enabled") !== "0"; // 기본 ON
+  return AI_ANALYSIS_ENABLED && getSetting("extract_enabled") === "1";
 }
