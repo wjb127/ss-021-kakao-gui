@@ -383,13 +383,13 @@ function rowToMessage(row: MessageRow): Message {
   };
 }
 
-export function getCachedMessages(chatId: string): Message[] {
+export function getCachedMessages(chatId: string, since?: string): Message[] {
   const db = getDb();
-  const rows = db
-    .prepare(
-      "SELECT * FROM messages WHERE chat_id = ? ORDER BY timestamp ASC",
-    )
-    .all(chatId) as MessageRow[];
+  const rows = (since
+    ? db.prepare("SELECT * FROM messages WHERE chat_id = ? AND julianday(timestamp) >= julianday(?) ORDER BY timestamp ASC, id ASC")
+      .all(chatId, since)
+    : db.prepare("SELECT * FROM messages WHERE chat_id = ? ORDER BY timestamp ASC, id ASC")
+      .all(chatId)) as MessageRow[];
   return rows.map(rowToMessage);
 }
 

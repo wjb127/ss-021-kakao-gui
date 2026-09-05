@@ -4,6 +4,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Chat, Message } from "@/lib/types";
 import { parseKmong } from "@/lib/kmong-parser";
+import { copyDeferredText } from "@/lib/clipboard";
 
 interface ChatSearchHit {
   id: string;
@@ -449,6 +450,8 @@ export function ChatView({
   } | null>(null);
   const [rawMode, setRawMode] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyBusy, setCopyBusy] = useState<"all" | "recent" | null>(null);
+  const copyBusyRef = useRef(false);
   const [copied2d, setCopied2d] = useState<"ok" | "none" | null>(null);
   const [copied2dCount, setCopied2dCount] = useState(0);
   const [manualInput, setManualInput] = useState("");
@@ -819,36 +822,59 @@ export function ChatView({
   }, []);
 
   async function handleCopy() {
-    const text = toPlainText(messages);
-    const error = await copyText(text);
-    if (error) {
-      window.alert(error);
-      return;
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    await handleCopyScope("all");
   }
 
   // 최근 2일치만 복사 (기준: 현재 시각 - 2일)
   async function handleCopyRecent() {
-    const cutoff = Date.now() - RECENT_COPY_DAYS * 24 * 60 * 60 * 1000;
-    const recent = messages.filter((m) => {
-      const t = new Date(m.timestamp).getTime();
-      return Number.isFinite(t) && t >= cutoff;
-    });
-    if (recent.length === 0) {
-      setCopied2d("none");
-      setTimeout(() => setCopied2d(null), 1800);
-      return;
+    await handleCopyScope("recent");
+  }
+
+  async function handleCopyScope(scope: "all" | "recent") {
+    if (!chat || copyBusyRef.current) return;
+    const chatId = chat.id;
+    copyBusyRef.current = true;
+    setCopyBusy(scope);
+    let count = 0;
+    let loadError: string | null = null;
+    try {
+      await copyDeferredText(async () => {
+        try {
+          const params = new URLSearchParams({ chatId, scope });
+          const response = await fetch(`/api/messages/export?${params}`, { cache: "no-store" });
+          if (!response.ok) throw new Error("대화를 가져오지 못했습니다. 다시 시도해 주세요.");
+          const data = await response.json() as { messages: Message[]; since?: string };
+          // 캐시하지 않는 큰 방의 현재 메시지도 기존처럼 복사할 수 있게 합친다.
+          const byId = new Map(messages.map((message) => [message.id, message]));
+          for (const message of data.messages) byId.set(message.id, message);
+          const selected = [...byId.values()].filter((message) =>
+            !data.since || new Date(message.timestamp).getTime() >= new Date(data.since).getTime(),
+          );
+          const text = toPlainText(selected);
+          count = selected.length;
+          if (!text) throw new Error(scope === "recent" ? "최근 2일간 복사할 대화가 없습니다." : "복사할 대화가 없습니다.");
+          return text;
+        } catch (error) {
+          loadError = error instanceof Error ? error.message : "대화를 가져오지 못했습니다.";
+          throw error;
+        }
+      });
+      if (previousChatIdRef.current !== chatId) return;
+      if (scope === "all") {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      } else {
+        setCopied2dCount(count);
+        setCopied2d("ok");
+        setTimeout(() => setCopied2d(null), 1800);
+      }
+    } catch (error) {
+      window.alert(loadError || (error instanceof Error && error.name === "Error"
+        ? error.message : "복사하지 못했습니다. 클립보드 권한을 확인하고 다시 시도해 주세요."));
+    } finally {
+      copyBusyRef.current = false;
+      setCopyBusy(null);
     }
-    const error = await copyText(toPlainText(recent));
-    if (error) {
-      window.alert(error);
-      return;
-    }
-    setCopied2dCount(recent.length);
-    setCopied2d("ok");
-    setTimeout(() => setCopied2d(null), 1800);
   }
 
   async function handleDownloadAll() {
@@ -930,8 +956,8 @@ export function ChatView({
     /* 메시지 영역 전체: 30% 서피스 #F5F6F8 */
     <div className="flex flex-col h-full w-full min-w-0 bg-[#F5F6F8]">
       {/* 헤더: 흰 배경, 하단 보더 */}
-      <div className="px-4 py-3 border-b border-[#D6D8DF] bg-white flex flex-col md:flex-row items-start justify-between gap-2">
-        <div className="min-w-0 w-full md:w-auto flex items-start gap-2">
+      <div className="px-2 py-2 md:px-4 md:py-3 border-b border-[#D6D8DF] bg-white flex items-center md:items-start justify-between gap-1 md:gap-2">
+        <div className="min-w-0 flex-1 md:flex-initial flex items-center md:items-start gap-1 md:gap-2">
           {/* 모바일 뒤로가기 */}
           {onBack && (
             <button
@@ -940,19 +966,19 @@ export function ChatView({
               title="뒤로"
               aria-label="뒤로가기"
             >
-              <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
             </button>
           )}
           <div className="min-w-0 flex-1">
-            <div className="text-base md:text-sm font-semibold text-[#1A1F36] truncate">
+            <div className="text-sm font-semibold text-[#1A1F36] truncate">
               {(!chat.display_name || chat.display_name === "(unknown)")
               ? `(멤버 ${chat.member_count}명)`
               : chat.display_name}
             </div>
-            <div className="md:hidden text-xs text-[#6B7280] whitespace-nowrap">
-              {chat.member_count}명 · 메시지 {messageTotal || sorted.length}개
+            <div className="md:hidden text-[10px] text-[#6B7280] truncate">
+              {chat.member_count}명 · {messageTotal || sorted.length}개
             </div>
             <div className="hidden md:block text-[11px] text-[#6B7280]">
               멤버 {chat.member_count}명 · 메시지 {messageTotal || sorted.length}개
@@ -971,12 +997,12 @@ export function ChatView({
             )}
           </div>
         </div>
-        <div className="flex flex-wrap justify-end w-full md:w-auto gap-1 md:gap-1.5 shrink-0 items-center">
+        <div className="flex justify-end gap-0.5 md:gap-1.5 shrink-0 items-center">
           {/* 새로고침 버튼 */}
           <button
             onClick={onRefresh}
             disabled={loading}
-            className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] disabled:text-[#9CA3AF] transition-colors"
+            className="p-1.5 md:p-0 text-[#6B7280] hover:text-[#1A1F36] disabled:text-[#9CA3AF] transition-colors"
             title="메시지 새로고침"
             aria-label="새로고침"
           >
@@ -990,7 +1016,7 @@ export function ChatView({
           </button>
           <button
             onClick={openSearch}
-            className={`p-2 md:p-0 transition-colors ${
+            className={`p-1.5 md:p-0 transition-colors ${
               searchOpen
                 ? "text-[#2959AA]"
                 : "text-[#6B7280] hover:text-[#1A1F36]"
@@ -1053,32 +1079,34 @@ export function ChatView({
           {/* 최근 2일치 복사 */}
           <button
             onClick={handleCopyRecent}
-            className={`text-xs md:text-[11px] px-2.5 py-1.5 md:px-2 md:py-1 rounded transition-colors ${
+            disabled={copyBusy !== null}
+            className={`text-[11px] px-2 py-1.5 md:py-1 rounded whitespace-nowrap disabled:opacity-60 transition-colors ${
               copied2d === "ok"
                 ? "bg-green-500 text-white"
                 : copied2d === "none"
                   ? "bg-[#FDE8E8] text-[#B23434]"
                   : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
             }`}
-            title={`최근 ${RECENT_COPY_DAYS}일치 메시지만 클립보드 복사`}
+            title={copied2d === "ok" ? `${copied2dCount}건 복사됨` : `저장된 최근 ${RECENT_COPY_DAYS}일치 대화 복사`}
           >
             {copied2d === "ok"
-              ? `${copied2dCount}건 복사됨`
+              ? "복사됨"
               : copied2d === "none"
                 ? "2일치 없음"
-                : `${RECENT_COPY_DAYS}일복사`}
+                : copyBusy === "recent" ? "준비 중" : `${RECENT_COPY_DAYS}일복사`}
           </button>
           {/* 전체 복사 버튼 */}
           <button
             onClick={handleCopy}
-            className={`text-xs md:text-[11px] px-2.5 py-1.5 md:px-2 md:py-1 rounded transition-colors ${
+            disabled={copyBusy !== null}
+            className={`text-[11px] px-2 py-1.5 md:py-1 rounded whitespace-nowrap disabled:opacity-60 transition-colors ${
               copied
                 ? "bg-green-500 text-white"
                 : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
             }`}
-            title="전체 메시지 클립보드 복사"
+            title="저장된 전체 대화 복사"
           >
-            {copied ? "복사됨" : "복사"}
+            {copied ? "복사됨" : copyBusy === "all" ? "준비 중" : "복사"}
           </button>
         </div>
       </div>
