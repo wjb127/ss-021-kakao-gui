@@ -520,7 +520,6 @@ export default function Home() {
             onRefresh={handleRefreshMessages}
             onRestore={selectedChat ? () => setRestoreChatId(selectedChat.id) : undefined}
             onBack={handleBack}
-            onOpenAI={() => setMobileAIOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
             onMessageSent={(message) => {
               setMessages((previous) => {

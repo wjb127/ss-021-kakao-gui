@@ -33,7 +33,6 @@ interface Props {
   onRefresh: () => void;
   onRestore?: () => void;
   onBack?: () => void;
-  onOpenAI?: () => void;
   onOpenSettings?: () => void;
   onAttachmentDownloaded?: (messageId: string, filePath: string) => void;
   onMessageSent?: (message: Message) => void;
@@ -190,11 +189,17 @@ async function revealLocalFile(path: string): Promise<string | null> {
 }
 
 async function copyText(text: string): Promise<string | null> {
+  if (!window.isSecureContext) {
+    return "복사하려면 HTTPS 주소로 접속해 주세요.";
+  }
+  if (!navigator.clipboard?.writeText) {
+    return "이 브라우저에서는 복사를 지원하지 않습니다. Safari 또는 Chrome에서 열어 주세요.";
+  }
   try {
     await navigator.clipboard.writeText(text);
     return null;
-  } catch (e) {
-    return String(e);
+  } catch {
+    return "복사하지 못했습니다. 브라우저의 클립보드 권한을 확인한 뒤 다시 시도해 주세요.";
   }
 }
 
@@ -421,7 +426,6 @@ export function ChatView({
   onRefresh,
   onRestore,
   onBack,
-  onOpenAI,
   onOpenSettings,
   onAttachmentDownloaded,
   onMessageSent,
@@ -787,7 +791,11 @@ export function ChatView({
 
   async function handleCopy() {
     const text = toPlainText(messages);
-    await navigator.clipboard.writeText(text);
+    const error = await copyText(text);
+    if (error) {
+      window.alert(error);
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
@@ -804,7 +812,11 @@ export function ChatView({
       setTimeout(() => setCopied2d(null), 1800);
       return;
     }
-    await navigator.clipboard.writeText(toPlainText(recent));
+    const error = await copyText(toPlainText(recent));
+    if (error) {
+      window.alert(error);
+      return;
+    }
     setCopied2dCount(recent.length);
     setCopied2d("ok");
     setTimeout(() => setCopied2d(null), 1800);
@@ -889,13 +901,13 @@ export function ChatView({
     /* 메시지 영역 전체: 30% 서피스 #F5F6F8 */
     <div className="flex flex-col h-full w-full min-w-0 bg-[#F5F6F8]">
       {/* 헤더: 흰 배경, 하단 보더 */}
-      <div className="px-4 py-3 border-b border-[#D6D8DF] bg-white flex items-start justify-between gap-2">
-        <div className="min-w-0 flex items-start gap-2">
+      <div className="px-4 py-3 border-b border-[#D6D8DF] bg-white flex flex-col md:flex-row items-start justify-between gap-2">
+        <div className="min-w-0 w-full md:w-auto flex items-start gap-2">
           {/* 모바일 뒤로가기 */}
           {onBack && (
             <button
               onClick={onBack}
-              className="md:hidden p-1 -ml-1 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
+              className="md:hidden shrink-0 p-1 -ml-1 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
               title="뒤로"
               aria-label="뒤로가기"
             >
@@ -904,13 +916,16 @@ export function ChatView({
               </svg>
             </button>
           )}
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="text-base md:text-sm font-semibold text-[#1A1F36] truncate">
               {(!chat.display_name || chat.display_name === "(unknown)")
               ? `(멤버 ${chat.member_count}명)`
               : chat.display_name}
             </div>
-            <div className="text-xs md:text-[11px] text-[#6B7280]">
+            <div className="md:hidden text-xs text-[#6B7280] whitespace-nowrap">
+              {chat.member_count}명 · 메시지 {messageTotal || sorted.length}개
+            </div>
+            <div className="hidden md:block text-[11px] text-[#6B7280]">
               멤버 {chat.member_count}명 · 메시지 {messageTotal || sorted.length}개
               {messageTotal > sorted.length && ` · 표시 ${sorted.length}개`}
               {mediaMessages.length > 0 && (
@@ -927,17 +942,7 @@ export function ChatView({
             )}
           </div>
         </div>
-        <div className="flex gap-1 md:gap-1.5 shrink-0 items-center">
-          {/* 모바일 AI 패널 열기 */}
-          {onOpenAI && (
-            <button
-              onClick={onOpenAI}
-              className="md:hidden text-sm px-3 py-1.5 rounded bg-[#2959AA] text-white hover:bg-[#1F4485] transition-colors font-medium"
-              title="AI 패널"
-            >
-              AI
-            </button>
-          )}
+        <div className="flex flex-wrap justify-end w-full md:w-auto gap-1 md:gap-1.5 shrink-0 items-center">
           {/* 새로고침 버튼 */}
           <button
             onClick={onRefresh}
