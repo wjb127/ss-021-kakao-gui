@@ -63,6 +63,7 @@ export default function Home() {
   const [messageCursor, setMessageCursor] = useState<MessageCursor | null>(null);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [messageTotal, setMessageTotal] = useState(0);
+  const [historyPending, setHistoryPending] = useState(false);
   const [filter, setFilter] = useState<"all" | "client" | "casual">("client");
   const [chatsLoading, setChatsLoading] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -108,11 +109,18 @@ export default function Home() {
 
     if (showLoading) setChatsLoading(true);
     const request = fetch("/api/chats")
-      .then((r) => {
+      .then(async (r) => {
         if (!r.ok) throw new Error(`채팅 목록 요청 실패: ${r.status}`);
-        return r.json();
+        const data = await r.json();
+        setChats(Array.isArray(data) ? data : []);
+        setChatsLoading(false);
+        if (r.headers.get("X-Chat-Snapshot") === "1") {
+          const fresh = await fetch("/api/chats?fresh=1");
+          if (!fresh.ok) throw new Error(`채팅 목록 갱신 실패: ${fresh.status}`);
+          const updated = await fresh.json();
+          if (Array.isArray(updated)) setChats(updated);
+        }
       })
-      .then((data) => setChats(Array.isArray(data) ? data : []))
       .catch(console.error)
       .finally(() => {
         chatsRequestRef.current = null;
@@ -186,18 +194,24 @@ export default function Home() {
             );
           }
 
-          const resetPage = prepend || showLoading;
+          const resetPage = prepend || showLoading || !loadedOlder;
+          const historyGrew = !resetPage && data.total > (cached?.total ?? 0)
+            && data.total > next.length;
+          const first = next[0];
           setCachedChat(messageCacheRef.current, chatId, {
             messages: next,
             total: data.total ?? next.length,
-            hasOlder: resetPage ? data.hasMore : cached?.hasOlder ?? data.hasMore,
-            cursor: resetPage ? data.nextCursor : cached?.cursor ?? data.nextCursor,
+            hasOlder: historyGrew || (resetPage ? data.hasMore : cached?.hasOlder ?? data.hasMore),
+            cursor: historyGrew && first
+              ? { timestamp: first.timestamp, id: first.id }
+              : resetPage ? data.nextCursor : cached?.cursor ?? data.nextCursor,
             loadedOlder: prepend ? true : showLoading ? false : loadedOlder,
           });
           return next;
         };
 
         if (selectedChatIdRef.current === chatId) {
+          setHistoryPending(!!data.historyPending);
           setMessages((previous) => {
             const next = updateMessages(previous);
             if (prepend) loadedOlderMessagesRef.current = true;
@@ -205,9 +219,15 @@ export default function Home() {
             return next;
           });
           setMessageTotal(data.total ?? incoming.length);
-          if (prepend || showLoading) {
+          if (prepend || showLoading || !loadedOlderMessagesRef.current) {
             setHasOlderMessages(data.hasMore);
             setMessageCursor(data.nextCursor);
+          } else if (cached && data.total > cached.total && data.total > cached.messages.length) {
+            const first = cached.messages[0];
+            if (first) {
+              setHasOlderMessages(true);
+              setMessageCursor({ timestamp: first.timestamp, id: first.id });
+            }
           }
         } else {
           updateMessages(cached?.messages ?? []);
@@ -246,6 +266,16 @@ export default function Home() {
     setMessagesLoading(false);
     return true;
   }, []);
+
+  useEffect(() => {
+    if (!historyPending || !selectedChatId) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void loadMessages(selectedChatId, { showLoading: false, sync: false });
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [historyPending, selectedChatId, loadMessages]);
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
@@ -298,6 +328,7 @@ export default function Home() {
 
   const handleSelect = useCallback((id: string) => {
     if (selectedChatIdRef.current === id) return;
+    setHistoryPending(false);
     selectedChatIdRef.current = id;
     if (!restoreCachedChat(id)) {
       setMessages([]);
@@ -322,7 +353,7 @@ export default function Home() {
   }, []);
 
   const handleRefreshMessages = useCallback(() => {
-    if (selectedChatId) void loadMessages(selectedChatId);
+    if (selectedChatId) void loadMessages(selectedChatId, { showLoading: false });
   }, [selectedChatId, loadMessages]);
 
   const handleLoadOlderMessages = useCallback(async () => {
@@ -331,6 +362,7 @@ export default function Home() {
       showLoading: false,
       before: messageCursor,
       prepend: true,
+      sync: false,
     });
   }, [selectedChatId, messageCursor, olderMessagesLoading, loadMessages]);
 

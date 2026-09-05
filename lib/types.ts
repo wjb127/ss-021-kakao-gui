@@ -72,6 +72,7 @@ export interface MessagePage {
   nextCursor: MessageCursor | null;
   total: number;
   deletedMessageIds?: string[];
+  historyPending?: boolean;
 }
 
 export type Urgency = "Low" | "Medium" | "High" | "Critical";

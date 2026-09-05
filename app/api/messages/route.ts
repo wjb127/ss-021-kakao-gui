@@ -1,7 +1,8 @@
 // 특정 채팅의 메시지 조회 (10명 이하: SQLite 캐시 + kakaocli 동기화)
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { enrichCachedMessages, listMessages } from "@/lib/kakaocli";
+import { backfillMessages, isBackfillPending } from "@/lib/message-backfill";
 import { normalizeKakaoEvents } from "@/lib/kakao-events";
 import {
   getCachedMessageCount,
@@ -84,6 +85,7 @@ export async function GET(req: NextRequest) {
   const shouldCache = memberCount > 0 && memberCount <= 10;
 
   if (shouldCache) {
+    let historyPending = isBackfillPending(chatId);
     let fresh = [] as Awaited<ReturnType<typeof listMessages>>;
     let deletedMessageIds: string[] = [];
     // 과거 페이지는 SQLite에서만 읽는다. 최신 페이지에서만 카카오 원본과 동기화한다.
@@ -91,26 +93,34 @@ export async function GET(req: NextRequest) {
       const hasCache = getCachedMessageCount(chatId) > 0;
       fresh = await listMessages(
         chatId,
-        hasCache ? "2d" : "50d",
-        hasCache ? 1000 : 5000,
+        "3d",
+        1000,
       );
       deletedMessageIds = fresh
         .map((message) => message.deleted_message_id)
         .filter((id): id is string => !!id);
       upsertMessages(fresh);
+      if (!hasCache) {
+        historyPending = true;
+        after(() => backfillMessages(chatId));
+      }
     }
 
     if (paginated) {
       const page = getCachedMessagePage(chatId, { before, limit });
       const cachedMessages = normalizeKakaoEvents(page.messages);
-      const messages = shouldSync
-        ? await enrichCachedMessages(chatId, cachedMessages)
-        : cachedMessages;
-      if (shouldSync) upsertMessages(messages);
+      // 최신 메시지는 listMessages에서 이미 이름·첨부 보정 후 저장했다.
+      // 캐시 페이지를 표시하기 위해 원본 DB를 다시 열지 않는다.
+      const messages = cachedMessages;
+      if (!before && shouldSync) {
+        // 과거 첨부의 경로 보정도 응답을 막지 않고 다음 캐시 조회에 반영한다.
+        after(async () => { upsertMessages(await enrichCachedMessages(chatId, cachedMessages)); });
+      }
       const response: MessagePage = {
         ...page,
         messages,
         deletedMessageIds,
+        historyPending,
       };
       return NextResponse.json(response);
     }
@@ -139,7 +149,7 @@ export async function GET(req: NextRequest) {
   }
 
   // 10명 초과: 캐시 없이 직접 조회
-  const messages = await listMessages(chatId, "10d", 1000);
+  const messages = await listMessages(chatId, "3d", 1000);
   if (paginated) {
     const pageMessages = messages.slice(-limit);
     const response: MessagePage = {

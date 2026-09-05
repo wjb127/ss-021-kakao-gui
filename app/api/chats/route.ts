@@ -1,7 +1,7 @@
 // 채팅 목록 + 카테고리 병합 (kakaocli + manual)
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { listChats } from "@/lib/kakaocli";
+import { getChatSnapshot, listChats } from "@/lib/kakaocli";
 import { getCategories, getManualChats } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
@@ -22,9 +22,12 @@ export async function GET(req: NextRequest) {
     ? Math.min(rawLimit, LOOKUP_LIMIT)
     : null;
   const limit = wantedId ? LOOKUP_LIMIT : (askedLimit ?? DEFAULT_LIMIT);
+  const snapshot = !wantedId && req.nextUrl.searchParams.get("fresh") !== "1"
+    ? getChatSnapshot(limit)
+    : null;
 
   const [chats, categories, manualChats] = await Promise.all([
-    listChats(limit),
+    snapshot ?? listChats(limit),
     getCategories(),
     Promise.resolve(getManualChats()),
   ]);
@@ -47,5 +50,7 @@ export async function GET(req: NextRequest) {
   if (wantedId) {
     return NextResponse.json(all.filter((c) => String(c.id) === wantedId));
   }
-  return NextResponse.json(all);
+  return NextResponse.json(all, {
+    headers: { "X-Chat-Snapshot": snapshot ? "1" : "0" },
+  });
 }

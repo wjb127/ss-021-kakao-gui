@@ -441,6 +441,12 @@ export function ChatView({
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const previousChatIdRef = useRef<string | null>(null);
   const previousLastMessageIdRef = useRef<string | null>(null);
+  const olderLoadInFlightRef = useRef(false);
+  const nearBottomRef = useRef(true);
+  const previousScrollTopRef = useRef(0);
+  const pendingPrependRef = useRef<{
+    chatId: string | undefined; height: number; firstId: string | undefined;
+  } | null>(null);
   const [rawMode, setRawMode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copied2d, setCopied2d] = useState<"ok" | "none" | null>(null);
@@ -669,23 +675,46 @@ export function ChatView({
 
   const lastMessageId = sorted[sorted.length - 1]?.id ?? null;
   useLayoutEffect(() => {
+    const pending = pendingPrependRef.current;
+    const el = scrollRef.current;
+    if (!pending || !el) return;
+    if (pending.chatId !== chat?.id || searchOpen) {
+      pendingPrependRef.current = null;
+      return;
+    }
+    if (pending.firstId !== visibleMessages[0]?.id) {
+      el.scrollTop += el.scrollHeight - pending.height;
+      previousScrollTopRef.current = el.scrollTop;
+      pendingPrependRef.current = null;
+    }
+  }, [visibleMessages, chat?.id, searchOpen]);
+
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     const chatChanged = previousChatIdRef.current !== (chat?.id ?? null);
     const latestChanged = previousLastMessageIdRef.current !== lastMessageId;
-    if (el && (chatChanged || latestChanged)) el.scrollTop = el.scrollHeight;
+    if (el && (chatChanged || (latestChanged && nearBottomRef.current))) {
+      el.scrollTop = el.scrollHeight;
+      nearBottomRef.current = true;
+    }
     previousChatIdRef.current = chat?.id ?? null;
     previousLastMessageIdRef.current = lastMessageId;
   }, [chat?.id, lastMessageId]);
 
   async function handleLoadOlder() {
+    if (olderLoadInFlightRef.current || loadingOlder || !hasOlderMessages) return;
+    olderLoadInFlightRef.current = true;
     const el = scrollRef.current;
-    const previousHeight = el?.scrollHeight ?? 0;
-    const previousTop = el?.scrollTop ?? 0;
-    await onLoadOlder();
-    requestAnimationFrame(() => {
-      if (!el) return;
-      el.scrollTop = previousTop + (el.scrollHeight - previousHeight);
-    });
+    pendingPrependRef.current = {
+      chatId: chat?.id,
+      height: el?.scrollHeight ?? 0,
+      firstId: visibleMessages[0]?.id,
+    };
+    try {
+      await onLoadOlder();
+    } finally {
+      olderLoadInFlightRef.current = false;
+    }
   }
 
   // 채팅방 바뀌면 rawMode/입력 초기화
@@ -1143,7 +1172,19 @@ export function ChatView({
       )}
 
       {/* 메시지 스크롤 영역 */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto [overflow-anchor:none]"
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          const movingUp = el.scrollTop < previousScrollTopRef.current;
+          previousScrollTopRef.current = el.scrollTop;
+          nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+          if (movingUp && el.scrollTop < 600 && !loading && !searchOpen && !rawMode) {
+            void handleLoadOlder();
+          }
+        }}
+      >
         {!loading && hasOlderMessages && (
           <div className="flex justify-center px-4 pt-3">
             <button

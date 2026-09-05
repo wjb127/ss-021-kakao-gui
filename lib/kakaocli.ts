@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import bplistParser from "bplist-parser";
 import type { Chat, Message, MessageAttachment } from "./types";
-import { getDownloadsForChat } from "./store";
+import { getDownloadsForChat, getSetting, setSetting } from "./store";
 import { formatCallEvent, normalizeKakaoEvents } from "./kakao-events";
 
 const execFileAsync = promisify(execFile);
@@ -25,14 +25,24 @@ type GlobalWithChatCache = {
 function getChatCache(): ChatCacheState {
   const global = globalThis as GlobalWithChatCache;
   if (!global[CHAT_CACHE_KEY]) {
+    let saved: Chat[] = [];
+    try {
+      const value = JSON.parse(getSetting("chat_list_snapshot") || "[]");
+      if (Array.isArray(value)) saved = value;
+    } catch { /* 이전 캐시가 손상됐으면 원본에서 다시 읽는다. */ }
     global[CHAT_CACHE_KEY] = {
-      data: [],
-      requestedLimit: 0,
+      data: saved,
+      requestedLimit: saved.length,
       expiresAt: 0,
       pending: null,
     };
   }
   return global[CHAT_CACHE_KEY];
+}
+
+export function getChatSnapshot(limit: number): Chat[] | null {
+  const data = getChatCache().data;
+  return data.length > 0 ? data.slice(0, limit) : null;
 }
 
 const KAKAOCLI_BIN = process.env.KAKAOCLI_BIN || "kakaocli";
@@ -222,14 +232,16 @@ export async function listChats(limit = 200): Promise<Chat[]> {
       });
     } catch (err) {
       console.error("kakaocli chats 실패:", formatKakaoCliError(err));
-      return [];
+      return cache.data;
     }
   })();
   cache.pending = request;
   try {
     const chats = await request;
-    cache.data = chats;
+    // 워커의 작은 조회가 화면용 목록 캐시를 축소하지 않게 유지한다.
+    cache.data = [...chats, ...cache.data.filter((old) => !chats.some((c) => c.id === old.id))];
     cache.requestedLimit = limit;
+    setSetting("chat_list_snapshot", JSON.stringify(cache.data));
     cache.expiresAt = Date.now() + CHAT_CACHE_TTL_MS;
     return chats;
   } finally {

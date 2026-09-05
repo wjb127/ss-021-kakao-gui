@@ -60,6 +60,9 @@ export function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp
       ON messages(chat_id, timestamp);
 
+    CREATE INDEX IF NOT EXISTS idx_messages_cursor
+      ON messages(chat_id, timestamp, id);
+
     CREATE TABLE IF NOT EXISTS manual_chats (
       id            TEXT PRIMARY KEY,
       display_name  TEXT NOT NULL,
