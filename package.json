@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "team:setup": "tsx scripts/team-setup.ts",
+    "team:recover": "tsx scripts/team-setup.ts --recover",
+    "test:team": "tsx scripts/test-team.ts",
     "dev": "./scripts/build-kakao-send-helper.sh && next dev -p 3033",
     "build": "./scripts/build-kakao-send-helper.sh && next build",
     "start": "next start -p 3032",
@@ -34,6 +37,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }

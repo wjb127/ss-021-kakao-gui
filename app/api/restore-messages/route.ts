@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import {
@@ -29,7 +31,7 @@ const SYSTEM_PROMPT = `대화 텍스트를 파싱해서 JSON 배열로만 반환
 - 시스템 메시지/알림/광고 제외
 - 빈 텍스트 제외`;
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const { chatId, rawText, isAppend } = (await req.json()) as {
     chatId?: string;
     rawText?: string;

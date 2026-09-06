@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 // 카카오톡 자동 발송 (프로젝트 전용 macOS 접근성 헬퍼)
 // 안전장치:
 //  - settings.send_enabled === "1" 필수
@@ -22,7 +24,7 @@ interface Body {
   confirmed?: boolean;
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const { chatId, text, confirmed } = (await req.json()) as Body;
 
   if (!chatId || !text?.trim()) {

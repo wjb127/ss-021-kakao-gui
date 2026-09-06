@@ -1,4 +1,5 @@
 "use client";
+import { useIsAdmin } from "./TeamShell";
 
 // 메시지 뷰 - 가운데 패널
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -213,6 +214,7 @@ function MediaMessage({
   isFromMe: boolean;
   onDownloaded?: (messageId: string, filePath: string) => void;
 }) {
+  const isAdmin = useIsAdmin();
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [optimisticPath, setOptimisticPath] = useState<string | undefined>();
@@ -318,9 +320,11 @@ function MediaMessage({
         <span className={`text-[10px] px-1.5 py-0.5 rounded ${statusClass}`}>
           {partialDownload ? "일부 다운로드" : localPath ? "다운로드됨" : hasUrl ? "미다운로드" : "원본없음"}
         </span>
+        {!isAdmin && localPath && Array.from({ length: Math.max(1, urlCount) }, (_, index) => <a key={index} className={`text-[10px] px-1.5 py-0.5 rounded ${btnBase}`} href={`/api/attachments?chatId=${encodeURIComponent(message.chat_id)}&messageId=${encodeURIComponent(message.id)}&index=${index}`}>파일 저장{urlCount > 1 ? ` ${index + 1}` : ""}</a>)}
         {localPath ? (
           <>
             <button
+              data-admin-only
               onClick={handleOpen}
               className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${btnBase}`}
               title={localPath}
@@ -328,6 +332,7 @@ function MediaMessage({
               열기
             </button>
             <button
+              data-admin-only
               onClick={handleReveal}
               className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${btnBase}`}
               title="Finder에서 보기"
@@ -335,6 +340,7 @@ function MediaMessage({
               폴더
             </button>
             <button
+              data-admin-only
               onClick={handleCopyPath}
               className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${btnBase}`}
               title="다운로드 경로 복사"
@@ -431,6 +437,7 @@ export function ChatView({
   onAttachmentDownloaded,
   onMessageSent,
 }: Props) {
+  const readOnly = !useIsAdmin();
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchComposingRef = useRef(false);
@@ -956,7 +963,7 @@ export function ChatView({
     /* 메시지 영역 전체: 30% 서피스 #F5F6F8 */
     <div className="flex flex-col h-full w-full min-w-0 bg-[#F5F6F8]">
       {/* 헤더: 흰 배경, 하단 보더 */}
-      <div className="px-2 py-2 md:px-4 md:py-3 border-b border-[#D6D8DF] bg-white flex items-center md:items-start justify-between gap-1 md:gap-2">
+      <div className="conversation-header px-2 py-2 md:px-4 md:py-3 border-b border-[#D6D8DF] bg-white flex items-center md:items-start justify-between gap-1 md:gap-2">
         <div className="min-w-0 flex-1 md:flex-initial flex items-center md:items-start gap-1 md:gap-2">
           {/* 모바일 뒤로가기 */}
           {onBack && (
@@ -997,7 +1004,7 @@ export function ChatView({
             )}
           </div>
         </div>
-        <div className="flex justify-end gap-0.5 md:gap-1.5 shrink-0 items-center">
+        <div className="conversation-actions flex justify-end gap-0.5 md:gap-1.5 shrink-0 items-center">
           {/* 새로고침 버튼 */}
           <button
             onClick={onRefresh}
@@ -1069,6 +1076,7 @@ export function ChatView({
           {/* 대화 복원 버튼 — 데스크탑 전용 */}
           {onRestore && (
             <button
+              data-admin-only
               onClick={onRestore}
               className="hidden md:inline-flex text-[11px] px-2 py-1 rounded transition-colors bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
               title="외부 대화 붙여넣기로 복원"
@@ -1364,7 +1372,8 @@ export function ChatView({
         )}
       </div>
 
-      {!isManual && (
+      {readOnly && <div className="border-t border-[#D6D8DF] bg-white px-4 py-3 text-xs text-slate-500">읽기 전용 · 메시지 발송과 내용 변경은 관리자만 할 수 있어요.</div>}
+      {!readOnly && !isManual && (
         <div className="shrink-0 border-t border-[#D6D8DF] bg-white px-3 py-2">
           {replyError && (
             <div className="mb-1.5 text-[10px] text-[#B23434]">{replyError}</div>
@@ -1416,6 +1425,7 @@ export function ChatView({
               </button>
             ) : (
               <button
+                data-admin-only
                 onClick={onOpenSettings}
                 className="h-10 shrink-0 px-3 rounded text-xs font-medium bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
                 title="설정에서 카톡 자동발송 활성화"
@@ -1428,7 +1438,7 @@ export function ChatView({
       )}
 
       {/* 임의 생성 채팅(manual_*) 전용 하단 입력창 — Claude로 파싱하여 메시지로 변환 */}
-      {isManual && (
+      {!readOnly && isManual && (
         <div className="border-t border-[#D6D8DF] bg-white px-3 py-2 shrink-0">
           {manualError && (
             <div className="mb-1 text-[10px] text-red-500">{manualError}</div>

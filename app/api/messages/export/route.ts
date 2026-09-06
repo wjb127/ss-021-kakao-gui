@@ -1,10 +1,12 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const GET = withTeamApi(handleGET, "chat");
 import { NextResponse, type NextRequest } from "next/server";
 import { getCachedMessages } from "@/lib/store";
 import { normalizeKakaoEvents } from "@/lib/kakao-events";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const chatId = req.nextUrl.searchParams.get("chatId");
   const scope = req.nextUrl.searchParams.get("scope");
   if (!chatId || (scope !== "all" && scope !== "recent")) {

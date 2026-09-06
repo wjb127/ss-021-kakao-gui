@@ -1,4 +1,5 @@
 "use client";
+import { useIsAdmin } from "./TeamShell";
 
 // 보드 뷰 — 가로 스크롤 카드 레이아웃
 import { useEffect, useRef, useState } from "react";
@@ -51,6 +52,7 @@ export function MemoCard({
   onOpenInbox: () => void;
   variant?: "horizontal" | "grid";
 }) {
+  const readOnly = !useIsAdmin();
   const [memo, setMemo] = useState("");
   const [saved, setSaved] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -123,7 +125,7 @@ export function MemoCard({
           <span className="text-[9px] text-[#9CA3AF]">메모</span>
           {saved && <span className="text-[9px] text-green-500">저장됨</span>}
         </div>
-        <textarea
+        <textarea readOnly={readOnly}
           value={memo}
           onChange={(e) => handleChange(e.target.value)}
           placeholder="메모 없음"
@@ -164,6 +166,7 @@ export function BoardView({
         <div className="ml-auto flex items-center gap-0.5 md:gap-1.5">
           {/* 1. 새 대화 추가 */}
           <button
+            data-admin-only
             onClick={onNewChat}
             className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
             title="새 대화 추가"
@@ -199,6 +202,7 @@ export function BoardView({
           </button>
           {/* 4. 설정 */}
           <button
+            data-admin-only
             onClick={onOpenSettings}
             className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
             title="설정"

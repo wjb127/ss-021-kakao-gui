@@ -1,13 +1,17 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const GET = withTeamApi(handleGET, "chat");
+export const POST = withTeamApi(handlePOST, "admin");
+export const DELETE = withTeamApi(handleDELETE, "admin");
 import { NextRequest, NextResponse } from "next/server";
 import { getProjectPaths, addProjectPath, removeProjectPath } from "@/lib/store";
 
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const chatId = req.nextUrl.searchParams.get("chatId");
   if (!chatId) return NextResponse.json({ error: "chatId required" }, { status: 400 });
   return NextResponse.json({ paths: getProjectPaths(chatId) });
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const { chatId, projectPath } = (await req.json()) as {
     chatId?: string;
     projectPath?: string;
@@ -19,7 +23,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ paths: getProjectPaths(chatId) });
 }
 
-export async function DELETE(req: NextRequest) {
+async function handleDELETE(req: NextRequest) {
   const { chatId, projectPath } = (await req.json()) as {
     chatId?: string;
     projectPath?: string;

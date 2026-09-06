@@ -62,3 +62,8 @@ public/swe-worker-*.js.map
 
 # 브레인스톰 기획 문서 (로컬 전용)
 brainstorms/
+
+# 로컬 검증 자료 및 도구 상태
+/.playwright-mcp/
+/.serena/
+/private-data/

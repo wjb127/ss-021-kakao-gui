@@ -63,20 +63,26 @@ function escapeLike(s: string): string {
 
 export function searchAll(
   q: string,
-  opts?: { chatId?: string },
+  opts?: { chatId?: string; allowedChatIds?: string[] },
 ): SearchResult {
   const db = getDb();
   const like = `%${escapeLike(q)}%`;
+  // 결과 상한을 적용하기 전에 모든 검색 종류를 같은 채팅방 범위로 제한한다.
+  const scopeParams: string[] = [];
+  let scopeSql = "";
+  if (opts?.chatId) { scopeSql += " AND chat_id = ?"; scopeParams.push(opts.chatId); }
+  if (opts?.allowedChatIds) {
+    scopeSql += " AND chat_id IN (SELECT value FROM json_each(?))";
+    scopeParams.push(JSON.stringify(opts.allowedChatIds));
+  }
 
   // ─── 메시지 ───
   const msgParams: (string | number)[] = [like];
   let msgSql = `SELECT id, chat_id, text, is_from_me, sender_name, timestamp, type
                 FROM messages
                 WHERE text LIKE ? ESCAPE '\\'`;
-  if (opts?.chatId) {
-    msgSql += " AND chat_id = ?";
-    msgParams.push(opts.chatId);
-  }
+  msgSql += scopeSql;
+  msgParams.push(...scopeParams);
   msgSql += " ORDER BY timestamp DESC LIMIT ?";
   msgParams.push(MAX_MESSAGES + 1);
 
@@ -106,9 +112,9 @@ export function searchAll(
   const memoRows = db
     .prepare(
       `SELECT chat_id, content, updated_at FROM memos
-       WHERE content LIKE ? ESCAPE '\\' ORDER BY updated_at DESC LIMIT 50`,
+       WHERE content LIKE ? ESCAPE '\\' ${scopeSql} ORDER BY updated_at DESC LIMIT 50`,
     )
-    .all(like) as { chat_id: string; content: string; updated_at: string }[];
+    .all(like, ...scopeParams) as { chat_id: string; content: string; updated_at: string }[];
 
   const memos: MemoHit[] = memoRows.map((r) => ({
     chatId: r.chat_id,
@@ -121,9 +127,9 @@ export function searchAll(
     .prepare(
       `SELECT id, chat_id, title, kind, status, created_at FROM requests
        WHERE (title LIKE ? ESCAPE '\\' OR detail LIKE ? ESCAPE '\\')
-       ORDER BY created_at DESC LIMIT 50`,
+       ${scopeSql} ORDER BY created_at DESC LIMIT 50`,
     )
-    .all(like, like) as {
+    .all(like, like, ...scopeParams) as {
     id: string;
     chat_id: string;
     title: string;

@@ -1,7 +1,9 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 import { NextRequest, NextResponse } from "next/server";
 import { saveContextFile } from "@/lib/context-export";
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const { chatId, displayName, projectPath } = (await req.json()) as {
     chatId?: string;
     displayName?: string;

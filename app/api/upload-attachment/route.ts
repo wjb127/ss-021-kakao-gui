@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 // 카톡 첨부 파일(사진/PDF) 프로젝트 폴더로 주입
 import { NextRequest, NextResponse } from "next/server";
 import path from "node:path";
@@ -27,7 +29,7 @@ function safeName(original: string): string {
   return base.replace(/[^\w가-힣.\-]/g, "_");
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const form = await req.formData();
   const chatId = form.get("chatId");
   const projectPath = form.get("projectPath");

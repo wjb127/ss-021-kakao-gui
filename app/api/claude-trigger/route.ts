@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 // Claude Code 원격 실행 트리거
 // 1) KAKAO_CONTEXT.md를 projectPath에 저장
 // 2) claude CLI를 spawn — prompt는 사용자 지시 + 컨텍스트 참조
@@ -15,7 +17,7 @@ interface TriggerBody {
   instruction?: string;
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const { chatId, displayName, projectPath, instruction } =
     (await req.json()) as TriggerBody;
 

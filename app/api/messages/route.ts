@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const GET = withTeamApi(handleGET, "chat");
 // 특정 채팅의 메시지 조회 (10명 이하: SQLite 캐시 + kakaocli 동기화)
 import { after, NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -38,7 +40,7 @@ function parsePageOptions(req: NextRequest): {
   };
 }
 
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const chatId = req.nextUrl.searchParams.get("chatId");
   if (!chatId) {
     return NextResponse.json(

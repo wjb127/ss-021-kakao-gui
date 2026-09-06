@@ -3,6 +3,8 @@
 export async function register() {
   // edge runtime에선 better-sqlite3 / kakaocli 못 씀
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  // 격리된 검증 서버에서는 원본 카카오 데이터와 외부 알림을 호출하지 않는다.
+  if (process.env.KAKAOGUI_DISABLE_WORKER === "1") return;
 
   // 이전 프로세스에서 running으로 남은 claude_runs 정리 (좀비 방지)
   try {

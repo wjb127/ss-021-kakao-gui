@@ -748,6 +748,7 @@ export function listRequests(opts?: {
   status?: RequestStatus;
   chatId?: string;
   limit?: number;
+  allowedChatIds?: string[];
 }): ClientRequest[] {
   const db = getDb();
   const where: string[] = [];
@@ -759,6 +760,10 @@ export function listRequests(opts?: {
   if (opts?.chatId) {
     where.push("chat_id = ?");
     params.push(opts.chatId);
+  }
+  if (opts?.allowedChatIds) {
+    where.push("chat_id IN (SELECT value FROM json_each(?))");
+    params.push(JSON.stringify(opts.allowedChatIds));
   }
   const sql =
     "SELECT * FROM requests" +

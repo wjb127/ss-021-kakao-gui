@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 // 카테고리 설정/해제
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -6,7 +8,7 @@ import type { Category } from "@/lib/types";
 
 const VALID: Category[] = ["bot", "client", "casual"];
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const body = (await req.json()) as {
       chatId?: string;

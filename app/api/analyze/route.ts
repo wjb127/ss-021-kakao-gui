@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 // AI 분석 - OpenAI 호출
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -40,7 +42,7 @@ function buildConversationDump(messages: Message[]): string {
     .join("\n");
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   if (!AI_ANALYSIS_ENABLED) {
     return NextResponse.json(
       { error: "AI 분석 기능이 비활성화됨" },

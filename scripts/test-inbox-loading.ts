@@ -12,6 +12,8 @@ function loadRoute(file: string, dependencies: Record<string, unknown>) {
   vm.runInNewContext(js, {
     exports,
     require: (name: string) => {
+      if (name === "@/lib/team-auth") return { withTeamApi: (handler: (req: unknown, user: unknown) => unknown) => (req: unknown) => handler(req, { role: "admin", active: true }) };
+      if (name === "@/lib/team-store") return { canReadChat: () => true };
       assert.ok(name in dependencies, `예상하지 않은 의존성: ${name}`);
       return dependencies[name];
     },

@@ -1,4 +1,5 @@
 "use client";
+import { useIsAdmin } from "./TeamShell";
 
 // AI 분석 패널 - 우측
 import { useEffect, useRef, useState } from "react";
@@ -50,6 +51,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
   // ── 메모 탭 ──────────────────────────────────────────────
+  const readOnly = !useIsAdmin();
   const [memo, setMemo] = useState("");
   const [memoSaved, setMemoSaved] = useState(false);
   const memoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -395,8 +397,10 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
         {/* ── 분석 탭 ── */}
         {tab === "분석" && (
           <div className="p-3 space-y-3">
+            {readOnly && !analysis && !loading && <p className="text-xs text-slate-500">저장된 분석이 없어요.</p>}
             {!analysis && !loading && (
               <button
+                data-admin-only
                 onClick={runAnalyze}
                 disabled={!AI_ANALYSIS_ENABLED}
                 className="w-full py-2 bg-[#2959AA] hover:bg-[#1D3F7A] text-white text-sm rounded transition-colors disabled:bg-[#D6D8DF] disabled:text-[#6B7280] disabled:cursor-not-allowed"
@@ -445,7 +449,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
                         const checked = checkedSet.has(i);
                         return (
                           <li key={i} className="flex items-start gap-2 text-xs text-[#1A1F36] bg-[#F5F6F8] border border-[#D6D8DF] rounded p-2">
-                            <input
+                            <input disabled={readOnly}
                               type="checkbox"
                               checked={checked}
                               onChange={() => {
@@ -465,6 +469,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
                 <div className="pt-2 border-t border-[#D6D8DF] flex items-center justify-between">
                   <span className="text-[10px] text-[#9CA3AF]">{formatTimestamp(analysis.analyzedAt)}</span>
                   <button
+                    data-admin-only
                     onClick={runAnalyze}
                     disabled={!AI_ANALYSIS_ENABLED}
                     className="text-[10px] px-2 py-1 bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36] rounded transition-colors disabled:text-[#9CA3AF] disabled:cursor-not-allowed"
@@ -480,6 +485,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
         {/* ── 답변 탭 ── */}
         {tab === "답변" && (
           <div className="p-3 space-y-3">
+            {readOnly && <p className="text-xs text-slate-500">답변 작성과 발송은 관리자만 할 수 있어요.</p>}
             {/* 톤 토글 */}
             <div>
               <div className="text-[10px] text-[#6B7280] mb-1">톤</div>
@@ -503,7 +509,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
             {/* 추가 지시 */}
             <div>
               <div className="text-[10px] text-[#6B7280] mb-1">추가 지시 (선택)</div>
-              <textarea
+              <textarea readOnly={readOnly}
                 value={replyInstruction}
                 onChange={(e) => setReplyInstruction(e.target.value)}
                 placeholder="예: 견적 보내겠다고 말하기 / 일정 다음 주로 미루기"
@@ -514,6 +520,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
 
             {/* 생성 버튼 */}
             <button
+              data-admin-only
               onClick={runDraftReply}
               disabled={replyLoading}
               className="w-full py-2 bg-[#2959AA] hover:bg-[#1D3F7A] text-white text-sm rounded transition-colors disabled:bg-[#9CA3AF]"
@@ -543,7 +550,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
                     {replyCopied ? "✓ 복사됨" : "복사"}
                   </button>
                 </div>
-                <textarea
+                <textarea readOnly={readOnly}
                   value={replyDraft}
                   onChange={(e) => setReplyDraft(e.target.value)}
                   className="w-full text-sm text-[#1A1F36] bg-white border border-[#D6D8DF] rounded p-2 resize-none focus:outline-none focus:border-[#2959AA] leading-5"
@@ -556,6 +563,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
                 {/* 카톡 자동 발송 */}
                 <div className="mt-2 pt-2 border-t border-[#E8E9EC]">
                   <button
+                    data-admin-only
                     onClick={() => setSendConfirmOpen(true)}
                     disabled={!sendEnabled || sendStatus === "sending" || !replyDraft.trim() || chat.id.startsWith("manual_")}
                     className={`w-full py-1.5 text-xs rounded transition-colors ${
@@ -620,6 +628,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
                       취소
                     </button>
                     <button
+                      data-admin-only
                       onClick={confirmSend}
                       className="flex-1 py-1.5 text-xs rounded bg-orange-500 text-white hover:bg-orange-600"
                     >
@@ -641,7 +650,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
                 <span className="text-[9px] text-green-600">저장됨</span>
               )}
             </div>
-            <textarea
+            <textarea readOnly={readOnly}
               value={memo}
               onChange={(e) => handleMemoChange(e.target.value)}
               placeholder={"프로젝트 요약, 고객 성향, 주의사항 등\n자유롭게 메모하세요"}
@@ -656,6 +665,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
             <div className="flex items-center justify-between gap-2 mb-1">
               <div className="text-[10px] text-[#6B7280]">프로젝트 경로 연동</div>
               <button
+                data-admin-only
                 onClick={suggestProjects}
                 disabled={suggestingProjects}
                 className="text-[10px] px-2 py-1 rounded bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36] disabled:bg-[#9CA3AF] disabled:text-white transition-colors"
@@ -675,6 +685,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
                         </span>
                         <span className="text-[9px] text-[#2959AA] shrink-0">{item.confidence}%</span>
                         <button
+                          data-admin-only
                           onClick={() => addSuggestedPath(item.projectPath)}
                           disabled={alreadyMapped}
                           className="text-[9px] px-1.5 py-0.5 rounded bg-[#2959AA] hover:bg-[#1D3F7A] text-white disabled:bg-green-500 transition-colors shrink-0"
@@ -707,6 +718,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
                           {p.split("/").pop() || p}
                         </span>
                         <button
+                          data-admin-only
                           onClick={() => exportContext(p)}
                           disabled={isExporting}
                           className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 transition-colors ${
@@ -719,6 +731,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
                           {isExporting ? "…" : isOk ? "저장됨" : "내보내기"}
                         </button>
                         <button
+                          data-admin-only
                           onClick={() => setClaudeModalPath(p)}
                           className="text-[10px] px-1.5 py-0.5 rounded bg-[#2959AA] hover:bg-[#1D3F7A] text-white shrink-0 transition-colors"
                           title="컨텍스트 저장 + Claude 원격 실행"
@@ -726,6 +739,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
                           Claude
                         </button>
                         <button
+                          data-admin-only
                           onClick={() => removePath(p)}
                           className="text-[10px] px-1.5 py-0.5 rounded bg-[#E8E9EC] hover:bg-red-100 hover:text-red-600 text-[#6B7280] shrink-0 transition-colors"
                         >
@@ -742,7 +756,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
               </ul>
             )}
             <div className="flex gap-1">
-              <input
+              <input disabled={readOnly}
                 type="text"
                 value={newPath}
                 onChange={(e) => setNewPath(e.target.value)}
@@ -751,6 +765,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
                 className="flex-1 text-[10px] px-2 py-1 border border-[#D6D8DF] rounded bg-[#F5F6F8] text-[#1A1F36] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2959AA]"
               />
               <button
+                data-admin-only
                 onClick={addPath}
                 disabled={!newPath.trim()}
                 className="text-xs px-2 py-1 rounded bg-[#2959AA] hover:bg-[#1D3F7A] text-white disabled:bg-[#9CA3AF] transition-colors shrink-0"

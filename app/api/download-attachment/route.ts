@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "chat");
 // 카톡 CDN URL 직접 다운로드 (인박스에서 자체 저장)
 // HEAD 는 404 지만 GET 은 인증 없이 통과되는 점 활용
 import { NextResponse } from "next/server";
@@ -127,7 +129,7 @@ function getDownloadItems(meta: AttachmentMeta): DownloadItem[] {
     : [];
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const body = (await req.json()) as {
       chatId?: string;
@@ -145,7 +147,7 @@ export async function POST(req: NextRequest) {
     // 이미 인박스에서 다운받았으면 그 경로 반환 (force=true 면 재다운)
     if (!force) {
       const cached = getDownload(messageId);
-      if (cached && existsSync(cached.filePath)) {
+      if (cached && cached.chatId === chatId && existsSync(cached.filePath)) {
         return NextResponse.json({
           path: cached.filePath,
           cached: true,
@@ -157,6 +159,7 @@ export async function POST(req: NextRequest) {
 
     // 카톡 앱에서 이미 다운받은 경우 그 경로 우선
     if (!force && meta.localFilePath && existsSync(meta.localFilePath)) {
+      recordDownload({ messageId, chatId, filePath: meta.localFilePath, url: "", size: 0 });
       return NextResponse.json({
         path: meta.localFilePath,
         source: "kakao-app",
@@ -249,7 +252,7 @@ export async function POST(req: NextRequest) {
       errors,
     });
   } catch (err) {
-    console.error("download-attachment 실패:", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error("download-attachment 실패:", err instanceof Error ? err.name : "unknown");
+    return NextResponse.json({ error: "첨부파일을 다운로드하지 못했어요." }, { status: 500 });
   }
 }

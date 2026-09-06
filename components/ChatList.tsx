@@ -1,4 +1,5 @@
 "use client";
+import { useIsAdmin } from "./TeamShell";
 
 // 채팅 목록 사이드바
 import { useMemo, useEffect, useRef, useState } from "react";
@@ -52,6 +53,7 @@ function CategoryDropdown({
   onSelect: (c: Category | null) => void;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const readOnly = !useIsAdmin();
   const [open, setOpenState] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -78,6 +80,7 @@ function CategoryDropdown({
   return (
     <div ref={ref} className="relative shrink-0">
       <button
+        disabled={readOnly}
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
         className={`text-[10px] px-1.5 py-0.5 rounded font-medium transition-colors ${
           category
@@ -154,7 +157,8 @@ function ChatRow({
   onCategoryChange: (chatId: string, category: Category | null) => void;
   onDeleteChat: (chatId: string) => void;
 }) {
-  const isManual = chat.id.startsWith("manual_");
+  const isAdmin = useIsAdmin();
+  const isManual = isAdmin && chat.id.startsWith("manual_");
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [catOpen, setCatOpen] = useState(false); // 카테고리 드롭다운 열림 상태 (z-index 보정용)
@@ -269,6 +273,7 @@ function ChatRow({
           )}
           {isManual && (
             <button
+              data-admin-only
               onClick={(e) => { e.stopPropagation(); onDeleteChat(chat.id); }}
               className="hidden md:inline text-[10px] text-[#9CA3AF] hover:text-red-500 transition-colors shrink-0"
               title="대화 삭제"
@@ -383,6 +388,7 @@ export function ChatList({
           <div className="flex items-center gap-0.5 md:gap-1.5">
             {/* 1. 새 대화 추가 */}
             <button
+              data-admin-only
               onClick={onNewChat}
               className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
               title="새 대화 추가"
@@ -418,6 +424,7 @@ export function ChatList({
             </button>
             {/* 4. 설정 */}
             <button
+              data-admin-only
               onClick={onOpenSettings}
               className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
               title="설정"

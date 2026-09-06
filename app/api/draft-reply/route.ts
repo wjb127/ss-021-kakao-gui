@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 // AI 답변 초안 생성 — Claude로 카카오톡 답변 1건 작성
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
@@ -33,7 +35,7 @@ interface DraftRequest {
   instruction?: string; // 사용자 추가 지시
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const { chatId, tone = "casual", instruction } = (await req.json()) as DraftRequest;
 
   if (!chatId) {

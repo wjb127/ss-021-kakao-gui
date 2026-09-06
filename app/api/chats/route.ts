@@ -1,3 +1,7 @@
+import { withTeamApi } from "@/lib/team-auth";
+import { canReadChat } from "@/lib/team-store";
+import type { TeamUser } from "@/lib/team-types";
+export const GET = withTeamApi(handleGET, "member");
 // 채팅 목록 + 카테고리 병합 (kakaocli + manual)
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -12,7 +16,7 @@ const DEFAULT_LIMIT = 200;
 // kakaocli는 1000건도 0.1초대라 조회 비용이 사실상 없다.
 const LOOKUP_LIMIT = 1000;
 
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest, user: TeamUser) {
   // ?chatId= 가 오면 목록이 아니라 "그 방 하나 찾기"가 목적이므로 깊게 조회한다.
   // (오래된 방은 상위 200 밖으로 밀려나 매핑이 있어도 안 잡히는 문제)
   const wantedId = req.nextUrl.searchParams.get("chatId");
@@ -46,7 +50,7 @@ export async function GET(req: NextRequest) {
     category: (categories[m.id] ?? null) as import("@/lib/types").Category | null,
   }));
 
-  const all = [...merged, ...manualMerged];
+  const all = [...merged, ...manualMerged].filter((chat) => canReadChat(user, String(chat.id)));
   if (wantedId) {
     return NextResponse.json(all.filter((c) => String(c.id) === wantedId));
   }

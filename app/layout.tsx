@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { TeamShell } from "@/components/TeamShell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -38,7 +39,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#D6D8DF" />
         <link rel="apple-touch-icon" href="/icon.svg" />
       </head>
-      <body className="h-full overflow-hidden">{children}</body>
+      <body className="h-full overflow-hidden"><TeamShell>{children}</TeamShell></body>
     </html>
   );
 }

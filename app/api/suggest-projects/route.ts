@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 import { NextRequest, NextResponse } from "next/server";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -284,7 +286,7 @@ function scoreCandidate(candidate: Candidate, terms: string[]): Suggestion | nul
   };
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const { chatId, displayName } = (await req.json()) as {
     chatId?: string;
     displayName?: string;

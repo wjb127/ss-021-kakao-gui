@@ -305,6 +305,18 @@ func send(chatName: String, message: String, selfChat: Bool) throws {
 }
 
 do {
+    // 여러 웹 요청이 하나의 카카오톡 화면을 동시에 조작하지 못하게 한다.
+    let lockPath = NSHomeDirectory() + "/.kakaocli/kakao-send.lock"
+    let lockFD = open(lockPath, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+    guard lockFD >= 0 else {
+        fputs("발송 잠금을 준비하지 못했습니다.\n", stderr)
+        exit(1)
+    }
+    defer { flock(lockFD, LOCK_UN); close(lockFD) }
+    guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else {
+        fputs("다른 메시지를 발송 중입니다. 잠시 후 다시 시도해 주세요.\n", stderr)
+        exit(1)
+    }
     let arguments = Array(CommandLine.arguments.dropFirst())
     let selfChat = arguments.first == "--me"
     let values = selfChat ? Array(arguments.dropFirst()) : arguments

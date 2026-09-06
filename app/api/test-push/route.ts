@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 // 테스트 푸시 — 텔레그램 봇으로 샘플 푸시 1건 전송
 import { NextResponse } from "next/server";
 import { sendPush } from "@/lib/telegram";
@@ -5,7 +7,7 @@ import { getSetting, setSetting } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+async function handlePOST() {
   // telegram_enabled가 0이어도 테스트는 일시 활성화로 강제 발송
   const wasEnabled = getSetting("telegram_enabled");
   if (wasEnabled !== "1") setSetting("telegram_enabled", "1");

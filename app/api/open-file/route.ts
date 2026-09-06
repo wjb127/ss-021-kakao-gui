@@ -1,3 +1,6 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
+export const PATCH = withTeamApi(handlePATCH, "admin");
 // 로컬 파일을 macOS 기본 앱으로 열기
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -11,7 +14,7 @@ const execFileAsync = promisify(execFile);
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const body = (await req.json()) as { path?: string };
     const filePath = body.path?.trim();
@@ -45,7 +48,7 @@ export async function POST(req: NextRequest) {
 }
 
 // 폴더에서 파일 표시 (Finder reveal)
-export async function PATCH(req: NextRequest) {
+async function handlePATCH(req: NextRequest) {
   try {
     const body = (await req.json()) as { path?: string };
     const filePath = body.path?.trim();

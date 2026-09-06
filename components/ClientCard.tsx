@@ -1,4 +1,5 @@
 "use client";
+import { useIsAdmin } from "./TeamShell";
 
 // 카드뷰 전용 클라이언트 카드
 // — 분석 / 메모 / 연동 한 카드에 통합
@@ -43,6 +44,7 @@ interface ProjectSuggestion {
 }
 
 export function ClientCard({ chat, onOpenInbox }: Props) {
+  const readOnly = !useIsAdmin();
   // 분석
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -312,6 +314,7 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-medium text-[#6B7280]">AI 분석</span>
                   <button
+                    data-admin-only
                     onClick={runAnalyze}
                     disabled={!AI_ANALYSIS_ENABLED || analyzing}
                     className="text-[10px] px-2 py-0.5 rounded bg-[#2959AA] hover:bg-[#1D3F7A] text-white disabled:bg-[#9CA3AF] transition-colors"
@@ -362,7 +365,7 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
                   <span className="text-[10px] font-medium text-[#6B7280]">메모</span>
                   {memoSaved && <span className="text-[9px] text-green-600">저장됨</span>}
                 </div>
-                <textarea
+                <textarea readOnly={readOnly}
                   value={memo}
                   onChange={(e) => handleMemoChange(e.target.value)}
                   placeholder="고객 정보, 주의사항 등"
@@ -377,6 +380,7 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-medium text-[#6B7280]">연동 프로젝트</span>
                   <button
+                    data-admin-only
                     onClick={suggestProjects}
                     disabled={suggestingProjects}
                     className="text-[9px] px-1.5 py-0.5 rounded bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36] disabled:bg-[#9CA3AF] disabled:text-white transition-colors"
@@ -396,6 +400,7 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
                             </span>
                             <span className="text-[9px] text-[#2959AA] shrink-0">{item.confidence}%</span>
                             <button
+                              data-admin-only
                               onClick={() => addSuggestedPath(item.projectPath)}
                               disabled={alreadyMapped}
                               className="text-[9px] px-1.5 py-0.5 rounded bg-[#2959AA] hover:bg-[#1D3F7A] text-white disabled:bg-green-500 transition-colors shrink-0"
@@ -427,6 +432,7 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
                               {p.split("/").pop() || p}
                             </span>
                             <button
+                              data-admin-only
                               onClick={() => exportContext(p)}
                               disabled={isExporting}
                               className={`text-[9px] px-1.5 py-0.5 rounded shrink-0 transition-colors ${
@@ -452,7 +458,7 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
                                 multiple
                                 accept="image/*,.pdf,.heic,.heif"
                                 className="hidden"
-                                disabled={uploadingPath === p}
+                                disabled={readOnly || uploadingPath === p}
                                 onChange={(e) => {
                                   if (e.target.files) {
                                     uploadFiles(p, e.target.files);
@@ -462,6 +468,7 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
                               />
                             </label>
                             <button
+                              data-admin-only
                               onClick={() => setClaudeModalPath(p)}
                               className="text-[9px] px-1.5 py-0.5 rounded bg-[#2959AA] hover:bg-[#1D3F7A] text-white shrink-0 transition-colors"
                               title="컨텍스트 저장 + Claude 원격 실행"
@@ -469,6 +476,7 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
                               Claude
                             </button>
                             <button
+                              data-admin-only
                               onClick={() => removePath(p)}
                               className="text-[10px] px-1 rounded text-[#9CA3AF] hover:text-red-600 shrink-0 transition-colors"
                             >
@@ -489,7 +497,7 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
                   </ul>
                 )}
                 <div className="flex gap-1">
-                  <input
+                  <input disabled={readOnly}
                     type="text"
                     value={newPath}
                     onChange={(e) => setNewPath(e.target.value)}
@@ -498,6 +506,7 @@ export function ClientCard({ chat, onOpenInbox }: Props) {
                     className="flex-1 text-[10px] px-2 py-1 border border-[#D6D8DF] rounded bg-white text-[#1A1F36] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2959AA]"
                   />
                   <button
+                    data-admin-only
                     onClick={addPath}
                     disabled={!newPath.trim()}
                     className="text-xs px-2 py-1 rounded bg-[#2959AA] hover:bg-[#1D3F7A] text-white disabled:bg-[#9CA3AF] transition-colors shrink-0"

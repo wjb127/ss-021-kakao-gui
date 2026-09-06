@@ -6,7 +6,7 @@ import { mkdirSync } from "node:fs";
 import { normalizeKakaoEvents } from "./kakao-events";
 import type { Message } from "./types";
 
-const DATA_DIR = path.join(os.homedir(), ".kakaocli");
+const DATA_DIR = process.env.KAKAOGUI_DATA_DIR || path.join(os.homedir(), ".kakaocli");
 const DB_PATH = path.join(DATA_DIR, "kakao-gui.db");
 
 let _db: Database.Database | null = null;
@@ -17,6 +17,7 @@ export function getDb(): Database.Database {
   mkdirSync(DATA_DIR, { recursive: true });
   _db = new Database(DB_PATH);
   _db.pragma("journal_mode = WAL");
+  _db.pragma("busy_timeout = 5000");
 
   _db.exec(`
     CREATE TABLE IF NOT EXISTS categories (

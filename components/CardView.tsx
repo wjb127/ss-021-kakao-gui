@@ -40,6 +40,7 @@ export function CardView({
         <div className="ml-auto flex items-center gap-0.5 md:gap-1.5">
           {/* 1. 새 대화 추가 */}
           <button
+            data-admin-only
             onClick={onNewChat}
             className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
             title="새 대화 추가"
@@ -75,6 +76,7 @@ export function CardView({
           </button>
           {/* 4. 설정 */}
           <button
+            data-admin-only
             onClick={onOpenSettings}
             className="p-2 md:p-0 text-[#6B7280] hover:text-[#1A1F36] transition-colors"
             title="설정"

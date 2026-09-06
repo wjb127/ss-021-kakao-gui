@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 // 텔레그램 봇 chat_id 자동 감지 헬퍼
 // 사용자: BotFather에서 봇 생성 → 토큰 저장 → 봇과 /start 보냄 → 이 라우트 호출
 // 가장 최근 업데이트의 chat.id를 telegram_chat_id로 저장
@@ -8,7 +10,7 @@ import { fetchChatIdFromUpdates } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+async function handlePOST() {
   const token = getSetting("telegram_bot_token");
   if (!token) {
     return NextResponse.json(

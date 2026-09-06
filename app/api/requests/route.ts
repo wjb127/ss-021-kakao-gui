@@ -1,3 +1,8 @@
+import { withTeamApi } from "@/lib/team-auth";
+import type { TeamUser } from "@/lib/team-types";
+export const GET = withTeamApi(handleGET, "member");
+export const PATCH = withTeamApi(handlePATCH, "admin");
+export const POST = withTeamApi(handlePOST, "admin");
 // 고객 요청 조회 / 상태변경 / 수동 추출
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -14,7 +19,7 @@ export const maxDuration = 60;
 
 const VALID_STATUS: RequestStatus[] = ["open", "in_progress", "done", "dismissed"];
 
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest, user: TeamUser) {
   const sp = req.nextUrl.searchParams;
   const statusParam = sp.get("status");
   const status =
@@ -24,12 +29,12 @@ export async function GET(req: NextRequest) {
   const chatId = sp.get("chatId") ?? undefined;
 
   return NextResponse.json({
-    requests: listRequests({ status, chatId }),
-    extractedToday: getDailyCount("extract_count"),
+    requests: listRequests({ status, chatId, allowedChatIds: user.role === "admin" ? undefined : user.chatIds }),
+    extractedToday: user.role === "admin" ? getDailyCount("extract_count") : 0,
   });
 }
 
-export async function PATCH(req: NextRequest) {
+async function handlePATCH(req: NextRequest) {
   const { id, status } = (await req.json()) as {
     id?: string;
     status?: string;
@@ -46,7 +51,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 // 수동 추출 트리거 (디바운스 무시)
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const { chatId } = (await req.json()) as { chatId?: string };
   if (!chatId) {
     return NextResponse.json({ error: "chatId 필수" }, { status: 400 });

@@ -16,6 +16,7 @@ import { CardView } from "@/components/CardView";
 import { SettingsModal } from "@/components/SettingsModal";
 import { NewChatModal } from "@/components/NewChatModal";
 import { RestoreModal } from "@/components/RestoreModal";
+import { useIsAdmin } from "@/components/TeamShell";
 
 type View = "inbox" | "board" | "card";
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
@@ -55,6 +56,7 @@ function setCachedChat(
 }
 
 export default function Home() {
+  const isAdmin = useIsAdmin();
   const [chats, setChats] = useState<Chat[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -84,8 +86,9 @@ export default function Home() {
     const dv = localStorage.getItem("defaultView") as View | null;
     const df = localStorage.getItem("defaultFilter") as "all" | "client" | "casual" | null;
     if (dv) { setDefaultView(dv); setView(dv); }
-    if (df) { setDefaultFilter(df); setFilter(df); }
-  }, []);
+    if (df && isAdmin) { setDefaultFilter(df); setFilter(df); }
+    if (!isAdmin) { setDefaultFilter("all"); setFilter("all"); }
+  }, [isAdmin]);
 
   // URL ?chat=xxx 처리 (ntfy 푸시 클릭 딥링크)
   useEffect(() => {

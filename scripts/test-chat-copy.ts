@@ -15,6 +15,7 @@ const saved = Array.from({ length: 1100 }, (_, i) => ({ id: String(i) }));
 let cutoff: string | undefined;
 const route = load("app/api/messages/export/route.ts", {
   require: (name: string) => ({
+    "@/lib/team-auth": { withTeamApi: (handler: unknown) => handler },
     "next/server": { NextResponse: { json: Response.json } },
     "@/lib/store": { getCachedMessages: (_id: string, since?: string) => { cutoff = since; return saved; } },
     "@/lib/kakao-events": { normalizeKakaoEvents: (data: unknown) => data },

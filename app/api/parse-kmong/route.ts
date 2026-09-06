@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 // 크몽 채팅 텍스트 룰 파싱 → manual 채팅 메시지 추가
 import { NextRequest, NextResponse } from "next/server";
 import { parseKmong } from "@/lib/kmong-parser";
@@ -14,7 +16,7 @@ export const runtime = "nodejs";
 
 type Mode = "replace" | "append";
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const body = (await req.json()) as {
     chatId?: string;
     rawText?: string;

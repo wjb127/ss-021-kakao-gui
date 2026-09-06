@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const POST = withTeamApi(handlePOST, "admin");
 // Claude 실행 취소 (POST { id })
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -6,7 +8,7 @@ import { getClaudeRun } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const { id } = (await req.json()) as { id?: string };
   if (!id) return NextResponse.json({ error: "id 필수" }, { status: 400 });
 

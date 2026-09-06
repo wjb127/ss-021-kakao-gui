@@ -169,6 +169,7 @@ export default function RequestsPage() {
                   <div className="flex gap-1 mt-2 justify-end">
                     {status !== "in_progress" && (
                       <button
+                        data-admin-only
                         onClick={() => changeStatus(r.id, "in_progress")}
                         className="text-[11px] px-2 py-1 border border-[#C7CAD3] rounded hover:bg-[#EDEEF1]"
                       >
@@ -177,6 +178,7 @@ export default function RequestsPage() {
                     )}
                     {status !== "done" && (
                       <button
+                        data-admin-only
                         onClick={() => changeStatus(r.id, "done")}
                         className="text-[11px] px-2 py-1 border border-[#C7CAD3] rounded hover:bg-[#EDEEF1]"
                       >
@@ -185,6 +187,7 @@ export default function RequestsPage() {
                     )}
                     {status !== "dismissed" && (
                       <button
+                        data-admin-only
                         onClick={() => changeStatus(r.id, "dismissed")}
                         className="text-[11px] px-2 py-1 border border-[#C7CAD3] rounded text-[#6B7280] hover:bg-[#EDEEF1]"
                       >
@@ -193,6 +196,7 @@ export default function RequestsPage() {
                     )}
                     {status !== "open" && (
                       <button
+                        data-admin-only
                         onClick={() => changeStatus(r.id, "open")}
                         className="text-[11px] px-2 py-1 border border-[#C7CAD3] rounded hover:bg-[#EDEEF1]"
                       >

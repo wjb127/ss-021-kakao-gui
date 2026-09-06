@@ -1,3 +1,5 @@
+import { withTeamApi } from "@/lib/team-auth";
+export const GET = withTeamApi(handleGET, "chat");
 // 저장된 분석 결과 조회
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -5,7 +7,7 @@ import { getTodoForChat } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const chatId = req.nextUrl.searchParams.get("chatId");
   if (!chatId) {
     return NextResponse.json(
