@@ -1389,8 +1389,9 @@ export function ChatView({
               onKeyDown={(event) => {
                 if (
                   event.key === "Enter"
-                  && (event.metaKey || event.ctrlKey)
+                  && !event.shiftKey
                   && !event.nativeEvent.isComposing
+                  && !replyComposingRef.current
                 ) {
                   event.preventDefault();
                   void handleReplySend();
