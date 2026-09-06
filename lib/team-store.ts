@@ -169,6 +169,23 @@ export function createSession(userId: string) {
   return token;
 }
 
+export async function changeOwnPassword(userId: string, sessionToken: string, currentPassword: string, newPassword: string) {
+  const db = teamDb();
+  const row = db.prepare("SELECT * FROM team_users WHERE id = ? AND active = 1").get(userId) as UserRow | undefined;
+  if (!await verifyPassword(currentPassword, row?.password_hash ?? null) || !row) throw new Error("현재 비밀번호를 확인해 주세요.");
+  const hash = await hashPassword(newPassword);
+  return db.transaction(() => {
+    // 해시 계산 중 비밀번호 재설정이나 접속 종료가 발생한 경우 변경을 막는다.
+    const current = db.prepare("SELECT password_hash FROM team_users WHERE id = ? AND active = 1").get(userId) as { password_hash: string } | undefined;
+    if (current?.password_hash !== row.password_hash || sessionUser(sessionToken)?.id !== userId) throw new Error("로그인 상태가 변경됐어요. 다시 로그인해 주세요.");
+    db.prepare("UPDATE team_users SET password_hash = ? WHERE id = ?").run(hash, userId);
+    db.prepare("DELETE FROM team_sessions WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM team_invites WHERE user_id = ?").run(userId);
+    audit(userId, "user.password_change", userId);
+    return createSession(userId);
+  }).immediate();
+}
+
 export function sessionUser(token?: string) {
   if (!token || token.length > 100) return null;
   const row = teamDb().prepare(`SELECT u.* FROM team_sessions s JOIN team_users u ON u.id = s.user_id

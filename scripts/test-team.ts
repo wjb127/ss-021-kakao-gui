@@ -125,6 +125,32 @@ async function main() {
   const concurrent = await Promise.all(allTokens.map((token) => me.GET(req("/api/auth/me", token))));
   assert.ok(concurrent.every((r) => r.status === 200));
   const beforeReset = team.createSession(admin.id);
+  const passwordRoute = await import("../app/api/auth/password/route");
+  const member = team.listTeamUsers().find((u) => u.username === "member0")!;
+  const memberSession = team.createSession(member.id);
+  const secondSession = team.createSession(member.id);
+  const newPassword = "Changed-only-Password-43";
+  const changeBody = { currentPassword: password, newPassword, confirmPassword: newPassword, userId: admin.id };
+  assert.equal((await passwordRoute.POST(req("/api/auth/password", undefined, "POST", changeBody))).status, 401);
+  assert.equal((await passwordRoute.POST(req("/api/auth/password", memberSession, "POST", changeBody, "https://attacker.example"))).status, 403);
+  assert.equal((await passwordRoute.POST(req("/api/auth/password", memberSession, "POST", { ...changeBody, currentPassword: "wrong" }))).status, 400);
+  assert.equal((await passwordRoute.POST(req("/api/auth/password", memberSession, "POST", { ...changeBody, confirmPassword: "mismatch" }))).status, 400);
+  assert.equal((await passwordRoute.POST(req("/api/auth/password", memberSession, "POST", { ...changeBody, newPassword: "short", confirmPassword: "short" }))).status, 400);
+  assert.ok(team.sessionUser(secondSession));
+  const changed = await passwordRoute.POST(req("/api/auth/password", memberSession, "POST", changeBody));
+  assert.equal(changed.status, 200);
+  const rotated = changed.headers.get("set-cookie")!.split(";")[0].split("=")[1];
+  assert.equal(team.sessionUser(rotated)?.id, member.id);
+  assert.equal(team.sessionUser(memberSession), null);
+  assert.equal(team.sessionUser(secondSession), null);
+  assert.equal(await team.authenticate(member.username, password), null);
+  assert.equal((await team.authenticate(member.username, newPassword))?.id, member.id);
+  assert.equal((await team.authenticate(admin.username, password))?.id, admin.id);
+  const racing = await Promise.allSettled([
+    team.changeOwnPassword(member.id, rotated, newPassword, password),
+    team.changeOwnPassword(member.id, rotated, newPassword, password),
+  ]);
+  assert.equal(racing.filter((result) => result.status === "fulfilled").length, 1);
   team.issueInvite(admin.id);
   assert.equal(team.sessionUser(beforeReset), null);
   assert.equal(await team.authenticate("owner", password), null);

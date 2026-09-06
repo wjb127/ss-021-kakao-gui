@@ -7,7 +7,7 @@ import type { TeamUser } from "@/lib/team-types";
 import type { Chat } from "@/lib/types";
 
 interface AuditRow { action: string; actor: string | null; targetId: string | null; createdAt: string }
-const actionLabels: Record<string, string> = { "user.create": "계정 생성", "user.update": "계정·권한 변경", "user.invite": "초대 코드 재발급", "user.revoke": "접속 종료", "user.activate": "비밀번호 설정", "user.login": "로그인" };
+const actionLabels: Record<string, string> = { "user.create": "계정 생성", "user.update": "계정·권한 변경", "user.invite": "초대 코드 재발급", "user.revoke": "접속 종료", "user.activate": "비밀번호 설정", "user.login": "로그인", "user.password_change": "비밀번호 변경" };
 
 export default function TeamAdminPage() {
   const actor = useTeamUser();

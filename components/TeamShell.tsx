@@ -48,7 +48,7 @@ export function TeamShell({ children }: { children: React.ReactNode }) {
       <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-[#D6D8DF] bg-white px-3 text-xs">
         <Link href="/" className="shrink-0 font-semibold text-[#1A1F36]">카카오 인박스</Link>
         <nav aria-label="계정 메뉴" className="flex min-w-0 items-center gap-3">
-          <span className="max-w-24 truncate text-slate-600">{user.displayName}</span>
+          <Link href="/account" title={user.displayName} className="shrink-0 font-medium text-[#2959AA]">내 계정</Link>
           {user.role === "admin" ? <a className="shrink-0 font-medium text-[#2959AA]" href="/admin">팀 관리</a> : <span className="shrink-0 text-slate-500">열람자</span>}
           <button className="shrink-0 text-slate-600" onClick={async () => {
             const response = await fetch("/api/auth/logout", { method: "POST" });
