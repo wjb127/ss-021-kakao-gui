@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
+import path from "node:path";
 
 function load(file: string, globals: Record<string, unknown>) {
   const exports: Record<string, (...args: any[]) => any> = {};
@@ -14,7 +15,10 @@ function load(file: string, globals: Record<string, unknown>) {
 const saved = Array.from({ length: 1100 }, (_, i) => ({ id: String(i) }));
 let cutoff: string | undefined;
 const route = load("app/api/messages/export/route.ts", {
+  process: { env: { KAKAOCLI_DB: "/synthetic/kakao.db", KAKAOCLI_KEY: "must-not-be-copied" } },
   require: (name: string) => ({
+    "node:path": { default: path },
+    "@/lib/db": { getDb: () => ({ name: "/synthetic/kakao-gui.db" }) },
     "@/lib/team-auth": { withTeamApi: (handler: unknown) => handler },
     "next/server": { NextResponse: { json: Response.json } },
     "@/lib/store": { getCachedMessages: (_id: string, since?: string) => { cutoff = since; return saved; } },
@@ -23,7 +27,12 @@ const route = load("app/api/messages/export/route.ts", {
 });
 const req = (query: string) => ({ nextUrl: new URL(`http://localhost/?${query}`) });
 const all = await route.GET(req("chatId=123&scope=all"));
-assert.equal((await all.json()).messages.length, 1100, "화면의 300건 제한을 적용하지 않는다");
+const exported = await all.json();
+assert.equal(exported.messages.length, 1100, "화면의 300건 제한을 적용하지 않는다");
+assert.equal(exported.sourceLine, "카카오 원본 DB: /synthetic/kakao.db | 인박스 DB: /synthetic/kakao-gui.db | chat_id: 123");
+assert.ok(!JSON.stringify(exported).includes("must-not-be-copied"));
+const manual = await route.GET(req("chatId=manual_one&scope=all"));
+assert.equal((await manual.json()).sourceLine, "인박스 DB: /synthetic/kakao-gui.db | chat_id: manual_one");
 assert.equal(cutoff, undefined);
 const now = Date.now();
 await route.GET(req("chatId=123&scope=recent"));

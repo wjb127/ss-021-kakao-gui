@@ -851,7 +851,7 @@ export function ChatView({
           const params = new URLSearchParams({ chatId, scope });
           const response = await fetch(`/api/messages/export?${params}`, { cache: "no-store" });
           if (!response.ok) throw new Error("대화를 가져오지 못했습니다. 다시 시도해 주세요.");
-          const data = await response.json() as { messages: Message[]; since?: string };
+          const data = await response.json() as { messages: Message[]; since?: string; sourceLine?: string };
           // 캐시하지 않는 큰 방의 현재 메시지도 기존처럼 복사할 수 있게 합친다.
           const selected = mergeExportMessages(messages, data.messages).filter((message) =>
             !data.since || new Date(message.timestamp).getTime() >= new Date(data.since).getTime(),
@@ -859,7 +859,7 @@ export function ChatView({
           const text = toPlainText(selected);
           count = selected.length;
           if (!text) throw new Error(scope === "recent" ? "최근 2일간 복사할 대화가 없습니다." : "복사할 대화가 없습니다.");
-          return text;
+          return data.sourceLine ? `${text}\n\n${data.sourceLine}` : text;
         } catch (error) {
           loadError = error instanceof Error ? error.message : "대화를 가져오지 못했습니다.";
           throw error;
