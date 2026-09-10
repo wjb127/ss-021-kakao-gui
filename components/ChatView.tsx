@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Chat, Message } from "@/lib/types";
 import { parseKmong } from "@/lib/kmong-parser";
 import { copyDeferredText } from "@/lib/clipboard";
+import { mergeExportMessages } from "@/lib/message-attachments";
 
 interface ChatSearchHit {
   id: string;
@@ -116,7 +117,7 @@ function attachmentUrlCount(message: Message): number {
 }
 
 function hasDownloadUrl(message: Message): boolean {
-  return attachmentUrlCount(message) > 0;
+  return attachmentUrlCount(message) > 0 || (message.type === "file" && /^\d+$/.test(message.id) && /^\d+$/.test(message.chat_id));
 }
 
 function replyPreview(message: Message): string {
@@ -223,9 +224,9 @@ function MediaMessage({
   const localPath = optimisticPath ?? message.localFilePath;
   const icon = message.type === "video" ? "🎥" : message.type === "file" ? "📎" : "📷";
   const label = mediaLabel(message.type);
-  const filename = localPath ? localPath.split("/").pop() : null;
+  const filename = localPath ? localPath.split("/").pop() : message.attachment?.name || (message.type === "file" ? message.text : null);
   const urlCount = attachmentUrlCount(message);
-  const hasUrl = urlCount > 0;
+  const hasUrl = hasDownloadUrl(message);
 
   async function handleOpen() {
     if (!localPath) return;
@@ -374,7 +375,7 @@ function MediaMessage({
         )}
       </span>
       {filename && (
-        <span className={`text-[10px] ${isFromMe ? "text-blue-200" : "text-[#6B7280]"} truncate max-w-[280px]`}>
+        <span className={`text-[10px] ${isFromMe ? "text-blue-200" : "text-[#6B7280]"} break-all max-w-full`}>
           {filename}
         </span>
       )}
@@ -401,7 +402,7 @@ export function toPlainText(messages: Message[]): string {
         : m.sender_name || `상대(${m.sender_id.slice(-4)})`;
       let text = m.text;
       if (isMediaMessage(m)) {
-        const name = m.localFilePath?.split("/").pop() || toPhotoFilename(m.timestamp);
+        const name = m.localFilePath?.split("/").pop() || m.attachment?.name || (m.type === "file" ? m.text || "첨부파일" : toPhotoFilename(m.timestamp));
         const state = m.localFilePath
           ? `다운로드됨: ${m.localFilePath}`
           : "미다운로드";
@@ -852,9 +853,7 @@ export function ChatView({
           if (!response.ok) throw new Error("대화를 가져오지 못했습니다. 다시 시도해 주세요.");
           const data = await response.json() as { messages: Message[]; since?: string };
           // 캐시하지 않는 큰 방의 현재 메시지도 기존처럼 복사할 수 있게 합친다.
-          const byId = new Map(messages.map((message) => [message.id, message]));
-          for (const message of data.messages) byId.set(message.id, message);
-          const selected = [...byId.values()].filter((message) =>
+          const selected = mergeExportMessages(messages, data.messages).filter((message) =>
             !data.since || new Date(message.timestamp).getTime() >= new Date(data.since).getTime(),
           );
           const text = toPlainText(selected);
@@ -1341,7 +1340,7 @@ export function ChatView({
                             </div>
                           )}
                           <div className="whitespace-pre-wrap break-words select-text cursor-text">
-                            {m.type === "photo" || m.type === "video" || m.type === "file" ? (
+                            {isMediaMessage(m) ? (
                               <MediaMessage
                                 message={m}
                                 isFromMe={m.is_from_me}

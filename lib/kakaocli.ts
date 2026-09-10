@@ -6,6 +6,7 @@ import bplistParser from "bplist-parser";
 import type { Chat, Message, MessageAttachment } from "./types";
 import { getDownloadsForChat, getSetting, setSetting } from "./store";
 import { formatCallEvent, normalizeKakaoEvents } from "./kakao-events";
+import { normalizeAttachmentMessage } from "./message-attachments";
 
 const execFileAsync = promisify(execFile);
 const CHAT_CACHE_TTL_MS = 15_000;
@@ -426,11 +427,11 @@ export async function enrichCachedMessages(
       .filter((message) => !message.is_from_me && !message.sender_name)
       .map((message) => message.sender_id),
   );
-  const mediaMessages = messages.filter((message) =>
+  const mediaMessages = messages.map(normalizeAttachmentMessage).filter((message) =>
     (message.type === "photo" ||
       message.type === "video" ||
-      message.type === "file") &&
-    !message.attachment,
+      message.type === "file" || message.type === "unknown") &&
+    (!message.attachment || !message.localFilePath),
   );
   const mediaMap = await fetchMediaMeta(
     chatId,
@@ -448,13 +449,13 @@ export async function enrichCachedMessages(
     const kakaoPath = meta?.localFilePath && existsSync(meta.localFilePath)
       ? meta.localFilePath
       : undefined;
-    return {
+    return normalizeAttachmentMessage({
       ...message,
       sender_name: message.sender_name ?? senderNames.get(message.sender_id),
       attachment: message.attachment ?? meta?.attachment,
       localFilePath:
         message.localFilePath ?? inboxDownloads.get(message.id) ?? kakaoPath,
-    };
+    });
   });
 }
 
@@ -504,6 +505,7 @@ export async function listMessages(
         m.type === "photo" ||
         m.type === "video" ||
         m.type === "file" ||
+        m.type === "unknown" ||
         isMultiPhotoText(m.text ?? ""),
     );
     const mediaMap = hasMedia
@@ -513,6 +515,7 @@ export async function listMessages(
             message.type === "photo" ||
             message.type === "video" ||
             message.type === "file" ||
+            message.type === "unknown" ||
             isMultiPhotoText(message.text ?? ""),
           ).map((message) => String(message.id)),
         )
@@ -540,7 +543,7 @@ export async function listMessages(
         meta?.localFilePath && existsSync(meta.localFilePath)
           ? meta.localFilePath
           : undefined;
-      return {
+      return normalizeAttachmentMessage({
         id: String(m.id),
         chat_id: String(m.chat_id),
         sender_id: String(m.sender_id),
@@ -556,7 +559,7 @@ export async function listMessages(
         reply: specialMeta?.reply,
         localFilePath: inboxPath ?? kakaoPath,
         attachment: meta?.attachment,
-      };
+      });
     });
     const merged = new Map<string, Message>(
       messages.map((message) => [message.id, message]),

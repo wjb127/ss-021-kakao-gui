@@ -141,8 +141,8 @@ async function handleGET(req: NextRequest) {
         return {
           ...m,
           sender_name: f?.sender_name ?? senderNames.get(m.sender_id),
-          localFilePath: f?.localFilePath,
-          attachment: f?.attachment,
+          localFilePath: f?.localFilePath ?? m.localFilePath,
+          attachment: f?.attachment ?? m.attachment,
           reply: f?.reply ?? m.reply,
           is_edited: f?.is_edited ?? m.is_edited,
         };

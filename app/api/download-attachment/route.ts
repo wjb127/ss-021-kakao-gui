@@ -87,6 +87,9 @@ function extFromMime(mt?: string): string {
     "image/webp": "webp",
     "video/mp4": "mp4",
     "video/quicktime": "mov",
+    "text/plain": "txt",
+    "application/pdf": "pdf",
+    "application/zip": "zip",
   };
   return map[mt.toLowerCase()] ?? mt.split("/")[1] ?? "bin";
 }
@@ -148,6 +151,7 @@ async function handlePOST(req: NextRequest) {
     if (!force) {
       const cached = getDownload(messageId);
       if (cached && cached.chatId === chatId && existsSync(cached.filePath)) {
+        recordDownload(cached);
         return NextResponse.json({
           path: cached.filePath,
           cached: true,

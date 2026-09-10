@@ -1,5 +1,7 @@
 // SQLite 기반 저장소 (better-sqlite3, 동기 API를 async로 래핑)
 import { getDb } from "./db";
+import { existsSync } from "node:fs";
+import { normalizeAttachmentMessage } from "./message-attachments";
 import type {
   Analysis,
   CategoriesFile,
@@ -390,7 +392,17 @@ export function getCachedMessages(chatId: string, since?: string): Message[] {
       .all(chatId, since)
     : db.prepare("SELECT * FROM messages WHERE chat_id = ? ORDER BY timestamp ASC, id ASC")
       .all(chatId)) as MessageRow[];
-  return rows.map(rowToMessage);
+  return resolveDownloadPaths(chatId, rows.map(rowToMessage));
+}
+
+export function resolveDownloadPaths(chatId: string, messages: Message[]): Message[] {
+  const downloads = new Map(getDownloadsForChat(chatId).map((item) => [item.messageId, item.filePath]));
+  return messages.map((message) => {
+    const downloaded = downloads.get(message.id);
+    const localFilePath = downloaded && existsSync(downloaded) ? downloaded
+      : message.localFilePath && existsSync(message.localFilePath) ? message.localFilePath : undefined;
+    return normalizeAttachmentMessage({ ...message, localFilePath });
+  });
 }
 
 export function getCachedMessageCount(chatId: string): number {
@@ -433,7 +445,7 @@ export function getCachedMessagePage(
   const first = pageRows[0];
 
   return {
-    messages: pageRows.map(rowToMessage),
+    messages: resolveDownloadPaths(chatId, pageRows.map(rowToMessage)),
     hasMore,
     nextCursor:
       hasMore && first
@@ -483,11 +495,11 @@ export function getCachedMessageContext(
     contextRadius,
   ) as MessageRow[];
 
-  return [
+  return resolveDownloadPaths(chatId, [
     ...before.reverse(),
     target,
     ...after,
-  ].map(rowToMessage);
+  ].map(rowToMessage));
 }
 
 // 특정 채팅의 모든 메시지 삭제 (새로파싱 모드용)
@@ -529,18 +541,22 @@ function rowToDownload(r: DownloadRow): DownloadRecord {
 
 export function recordDownload(rec: Omit<DownloadRecord, "downloadedAt">): void {
   const db = getDb();
-  db.prepare(
-    `INSERT OR REPLACE INTO downloads
-     (message_id, chat_id, file_path, url, size, downloaded_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(
-    rec.messageId,
-    rec.chatId,
-    rec.filePath,
-    rec.url,
-    rec.size,
-    new Date().toISOString(),
-  );
+  db.transaction(() => {
+    db.prepare(
+      `INSERT OR REPLACE INTO downloads
+       (message_id, chat_id, file_path, url, size, downloaded_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      rec.messageId,
+      rec.chatId,
+      rec.filePath,
+      rec.url,
+      rec.size,
+      new Date().toISOString(),
+    );
+    db.prepare("UPDATE messages SET local_file_path = ? WHERE id = ? AND chat_id = ?")
+      .run(rec.filePath, rec.messageId, rec.chatId);
+  }).immediate();
 }
 
 export function getDownload(messageId: string): DownloadRecord | null {
