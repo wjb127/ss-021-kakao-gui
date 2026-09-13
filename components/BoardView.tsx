@@ -93,48 +93,43 @@ export function MemoCard({
       style={variant === "horizontal" && memoOpen ? { height: "calc(100vh - 56px - 2rem)" } : undefined}
     >
       {/* 카드 헤더 */}
-      <div className="px-3 pt-3 pb-2 border-b border-[#E8E9EC]">
+      <div className={`flex items-center gap-1 px-2 py-1 ${memoOpen ? "border-b border-[#E8E9EC]" : ""}`}>
         <button
           onClick={onOpenInbox}
-          className="w-full text-left group"
-          title="인박스에서 열기"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left group min-h-8"
+          title={`${name} · 인박스에서 열기`}
         >
-          <div className="flex items-start justify-between gap-1 mb-1.5">
-            <span className="text-sm font-semibold text-[#1A1F36] leading-tight line-clamp-2 group-hover:text-[#2959AA] transition-colors">
+            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#1A1F36] group-hover:text-[#2959AA] transition-colors">
               {name}
             </span>
             {chat.unread_count > 0 && (
-              <span className="shrink-0 text-[9px] bg-red-500 text-white rounded-full px-1.5 py-0.5 mt-0.5">
+              <span className="shrink-0 text-[9px] bg-red-500 text-white rounded-full px-1.5 py-0.5">
                 {chat.unread_count > 99 ? "99+" : chat.unread_count}
               </span>
             )}
-          </div>
-          <div className="flex items-center gap-1.5">
             {chat.category && (
-              <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${CATEGORY_STYLES[chat.category]}`}>
+              <span className={`shrink-0 text-[9px] px-1.5 py-0.5 rounded font-medium ${CATEGORY_STYLES[chat.category]}`}>
                 {CATEGORY_LABELS[chat.category]}
               </span>
             )}
-            <span className="text-[9px] text-[#9CA3AF]">👥 {chat.member_count}</span>
-            <span className="text-[9px] text-[#9CA3AF] ml-auto">{formatTime(chat.last_message_at)}</span>
-          </div>
+            <span className="shrink-0 whitespace-nowrap text-[9px] text-[#9CA3AF]">👥 {chat.member_count}</span>
+            <span className="shrink-0 text-[9px] text-[#9CA3AF]">{formatTime(chat.last_message_at)}</span>
         </button>
-      </div>
-
-      {/* 메모 영역 */}
-      <div className="flex-1 flex flex-col p-2 min-h-0">
-        <div className="flex items-center justify-between">
           <button type="button" aria-expanded={memoOpen}
+            aria-label={memoOpen ? "메모 접기" : "메모 펼치기"}
+            title={memoOpen ? "메모 접기" : "메모 펼치기"}
             aria-controls={`board-memo-${chat.id}`}
             onClick={() => setMemoOpen((open) => !open)}
-            className="flex min-h-9 items-center gap-1.5 text-xs text-[#6B7280] hover:text-[#2959AA] focus-visible:outline-2 focus-visible:outline-[#2959AA] rounded px-1">
+            className="flex h-8 w-8 shrink-0 items-center justify-center text-[#6B7280] hover:bg-[#F5F6F8] hover:text-[#2959AA] focus-visible:outline-2 focus-visible:outline-[#2959AA] rounded">
             <svg className={`h-3.5 w-3.5 ${memoOpen ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
             </svg>
-            {memoOpen ? "메모 접기" : "메모 펼치기"}
           </button>
-          {saved && <span className="text-[9px] text-green-500">저장됨</span>}
-        </div>
+      </div>
+
+      {/* 접힌 상태에서는 메모 영역의 여백도 숨긴다. */}
+      <div className={memoOpen ? "flex-1 flex flex-col p-2 min-h-0" : "hidden"}>
+        {saved && <span className="text-[9px] text-green-500 mb-1">저장됨</span>}
         <textarea id={`board-memo-${chat.id}`} aria-label={`${name} 메모`} hidden={!memoOpen} readOnly={readOnly}
           value={memo}
           onChange={(e) => handleChange(e.target.value)}
