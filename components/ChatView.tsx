@@ -452,6 +452,7 @@ export function ChatView({
   const previousLastMessageIdRef = useRef<string | null>(null);
   const olderLoadInFlightRef = useRef(false);
   const nearBottomRef = useRef(true);
+  const [scrollPosition, setScrollPosition] = useState<{ chatId?: string; away: boolean }>({ away: false });
   const previousScrollTopRef = useRef(0);
   const pendingPrependRef = useRef<{
     chatId: string | undefined; height: number; firstId: string | undefined;
@@ -685,6 +686,23 @@ export function ChatView({
   const downloadBatch = downloadableMessages.slice(0, 20);
 
   const lastMessageId = sorted[sorted.length - 1]?.id ?? null;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      const away = el.scrollHeight - el.scrollTop - el.clientHeight > 8;
+      setScrollPosition((previous) => previous.chatId === chat?.id && previous.away === away
+        ? previous : { chatId: chat?.id, away });
+    };
+    // 화면 크기와 메시지 높이가 바뀌어도 버튼 상태를 다시 계산한다.
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    for (const child of el.children) observer.observe(child);
+    el.addEventListener("scroll", update, { passive: true });
+    const frame = requestAnimationFrame(update);
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); el.removeEventListener("scroll", update); };
+  }, [chat?.id, loading, rawMode, visibleMessages]);
+
   useLayoutEffect(() => {
     const pending = pendingPrependRef.current;
     const el = scrollRef.current;
@@ -1207,9 +1225,10 @@ export function ChatView({
       )}
 
       {/* 메시지 스크롤 영역 */}
+      <div className="relative min-h-0 flex-1">
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto [overflow-anchor:none]"
+        className="h-full overflow-y-auto [overflow-anchor:none]"
         onScroll={(event) => {
           const el = event.currentTarget;
           const movingUp = el.scrollTop < previousScrollTopRef.current;
@@ -1369,6 +1388,24 @@ export function ChatView({
             })}
           </div>
         )}
+      </div>
+
+      {!loading && visibleMessages.length > 0 && scrollPosition.chatId === chat?.id && scrollPosition.away && (
+        <button
+          type="button"
+          aria-label="맨 아래로 이동"
+          title="맨 아래로 이동"
+          className="absolute bottom-4 right-4 z-10 grid h-11 w-11 place-items-center rounded-full border border-[#D6D8DF] bg-white text-[#2959AA] shadow-md transition-colors hover:bg-[#EEF2F8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2959AA]"
+          onClick={() => {
+            const el = scrollRef.current;
+            if (el) el.scrollTo({ top: el.scrollHeight, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+          }}
+        >
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 4v16M5 13l7 7 7-7" />
+          </svg>
+        </button>
+      )}
       </div>
 
       {readOnly && <div className="border-t border-[#D6D8DF] bg-white px-4 py-3 text-xs text-slate-500">읽기 전용 · 메시지 발송과 내용 변경은 관리자만 할 수 있어요.</div>}
