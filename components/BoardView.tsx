@@ -55,6 +55,7 @@ export function MemoCard({
 }) {
   const readOnly = !useIsAdmin();
   const [memo, setMemo] = useState("");
+  const [memoOpen, setMemoOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -87,9 +88,9 @@ export function MemoCard({
   return (
     <div
       className={`flex flex-col bg-white border border-[#D6D8DF] rounded-lg overflow-hidden shadow-sm ${
-        variant === "horizontal" ? "w-56 shrink-0" : "w-full h-72"
+        variant === "horizontal" ? "w-56 shrink-0" : `w-full ${memoOpen ? "h-72" : ""}`
       }`}
-      style={variant === "horizontal" ? { height: "calc(100vh - 56px - 2rem)" } : undefined}
+      style={variant === "horizontal" && memoOpen ? { height: "calc(100vh - 56px - 2rem)" } : undefined}
     >
       {/* 카드 헤더 */}
       <div className="px-3 pt-3 pb-2 border-b border-[#E8E9EC]">
@@ -122,11 +123,19 @@ export function MemoCard({
 
       {/* 메모 영역 */}
       <div className="flex-1 flex flex-col p-2 min-h-0">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[9px] text-[#9CA3AF]">메모</span>
+        <div className="flex items-center justify-between">
+          <button type="button" aria-expanded={memoOpen}
+            aria-controls={`board-memo-${chat.id}`}
+            onClick={() => setMemoOpen((open) => !open)}
+            className="flex min-h-9 items-center gap-1.5 text-xs text-[#6B7280] hover:text-[#2959AA] focus-visible:outline-2 focus-visible:outline-[#2959AA] rounded px-1">
+            <svg className={`h-3.5 w-3.5 ${memoOpen ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+            </svg>
+            {memoOpen ? "메모 접기" : "메모 펼치기"}
+          </button>
           {saved && <span className="text-[9px] text-green-500">저장됨</span>}
         </div>
-        <textarea readOnly={readOnly}
+        <textarea id={`board-memo-${chat.id}`} aria-label={`${name} 메모`} hidden={!memoOpen} readOnly={readOnly}
           value={memo}
           onChange={(e) => handleChange(e.target.value)}
           placeholder="메모 없음"
