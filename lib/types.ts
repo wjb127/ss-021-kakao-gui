@@ -9,6 +9,7 @@ export interface Chat {
   last_message_at: string;
   type?: string;
   category: Category | null;
+  board?: import("./board-types").BoardState;
 }
 
 export interface MessageAttachment {

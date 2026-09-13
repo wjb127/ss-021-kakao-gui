@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getChatSnapshot, listChats } from "@/lib/kakaocli";
 import { getCategories, getManualChats } from "@/lib/store";
+import { getBoardState } from "@/lib/board-store";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +51,8 @@ async function handleGET(req: NextRequest, user: TeamUser) {
     category: (categories[m.id] ?? null) as import("@/lib/types").Category | null,
   }));
 
-  const all = [...merged, ...manualMerged].filter((chat) => canReadChat(user, String(chat.id)));
+  const all = [...merged, ...manualMerged].filter((chat) => canReadChat(user, String(chat.id)))
+    .map((chat) => ({ ...chat, board: getBoardState(String(chat.id)) }));
   if (wantedId) {
     return NextResponse.json(all.filter((c) => String(c.id) === wantedId));
   }

@@ -7,6 +7,7 @@ import type { Chat, Message, MessageAttachment } from "./types";
 import { getDownloadsForChat, getSetting, setSetting } from "./store";
 import { formatCallEvent, normalizeKakaoEvents } from "./kakao-events";
 import { normalizeAttachmentMessage } from "./message-attachments";
+import { observeBoardChats } from "./board-store";
 
 const execFileAsync = promisify(execFile);
 const CHAT_CACHE_TTL_MS = 15_000;
@@ -217,7 +218,7 @@ export async function listChats(limit = 200): Promise<Chat[]> {
         );
       const fallbackNames = await fetchChatDisplayNames(missingNameIds);
 
-      return data.map((c) => {
+      const freshChats = data.map((c) => {
         const id = String(c.id);
         return {
           id,
@@ -231,6 +232,20 @@ export async function listChats(limit = 200): Promise<Chat[]> {
           category: null,
         };
       });
+      const incomingIds = new Map<string, string>();
+      const myId = process.env.KAKAOCLI_USER_ID ?? "";
+      const unreadIds = freshChats.filter((chat) => chat.unread_count > 0 && /^\d+$/.test(chat.id)).map((chat) => chat.id);
+      if (/^\d+$/.test(myId) && unreadIds.length) {
+        try {
+          // 읽고 다시 수신해 안 읽은 개수가 같아져도 새 수신 ID로 구분한다.
+          const rows = await runQuery(`SELECT CAST(r.chatId AS TEXT), (SELECT CAST(m.logId AS TEXT) FROM NTChatMessage m WHERE m.chatId = r.chatId AND m.authorId != ${myId} AND m.authorId != 0 ORDER BY m.logId DESC LIMIT 1) FROM NTChatRoom r WHERE r.chatId IN (${unreadIds.join(",")})`) as [string, string][];
+          for (const [id, incoming] of rows) if (incoming) incomingIds.set(String(id), String(incoming));
+        } catch (error) {
+          console.error("보드 수신 ID 조회 실패:", formatKakaoCliError(error));
+        }
+      }
+      observeBoardChats(freshChats, incomingIds);
+      return freshChats;
     } catch (err) {
       console.error("kakaocli chats 실패:", formatKakaoCliError(err));
       return cache.data;

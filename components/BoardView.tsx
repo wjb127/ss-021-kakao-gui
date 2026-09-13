@@ -1,10 +1,11 @@
 "use client";
 import { useIsAdmin } from "./TeamShell";
 
-// 보드 뷰 — 가로 스크롤 카드 레이아웃
+// 보드 뷰 — 채팅방별 업무 단계 관리
 import { useEffect, useRef, useState } from "react";
 import type { Category, Chat } from "@/lib/types";
 import { ViewSwitcher } from "./ViewSwitcher";
+import { BOARD_STAGES, type BoardStage, type BoardState } from "@/lib/board-types";
 
 interface Props {
   chats: Chat[];
@@ -138,8 +139,6 @@ export function MemoCard({
 
 export function BoardView({
   chats,
-  filter,
-  onFilterChange,
   onSwitchToInbox,
   onSwitchToCard,
   onOpenSettings,
@@ -147,6 +146,41 @@ export function BoardView({
   refreshing,
   onRefresh,
 }: Props) {
+  const isAdmin = useIsAdmin();
+  const [overrides, setOverrides] = useState<Record<string, BoardState>>({});
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<BoardStage | null>(null);
+  const [pending, setPending] = useState<string[]>([]);
+  const pendingRef = useRef(new Set<string>());
+  const [notice, setNotice] = useState("");
+  function stateFor(chat: Chat): BoardState {
+    const server = chat.board ?? { stage: "new", revision: 0 };
+    const local = overrides[chat.id];
+    return local && local.revision > server.revision ? local : server;
+  }
+  async function move(chat: Chat, stage: BoardStage) {
+    if (!isAdmin || pendingRef.current.has(chat.id) || stateFor(chat).stage === stage) return;
+    pendingRef.current.add(chat.id);
+    setPending([...pendingRef.current]);
+    setNotice("");
+    try {
+      const response = await fetch("/api/board", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: chat.id, stage, revision: stateFor(chat).revision }),
+      });
+      const result = await response.json();
+      if (response.ok || response.status === 409) {
+        setOverrides((previous) => ({ ...previous, [chat.id]: { stage: result.stage, revision: result.revision } }));
+      }
+      if (!response.ok) throw new Error(result.error || "단계를 저장하지 못했어요.");
+      setNotice(`${chat.display_name} · ${BOARD_STAGES.find((item) => item.id === stage)?.label} 단계로 이동했어요.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "단계를 저장하지 못했어요. 다시 시도해 주세요.");
+    } finally {
+      pendingRef.current.delete(chat.id);
+      setPending([...pendingRef.current]);
+    }
+  }
   // 보드 뷰는 고객 카테고리만 강제
   const filtered = [...chats]
     .filter((c) => c.category === "client")
@@ -155,7 +189,7 @@ export function BoardView({
   return (
     <div className="flex flex-col h-screen bg-[#F5F6F8] overflow-hidden">
       {/* 상단 바 — ChatList 헤더와 동일 아이콘/순서 */}
-      <div className="px-3 py-3 bg-white border-b border-[#D6D8DF] flex items-center gap-2 md:gap-3 shrink-0">
+      <div className="px-3 py-3 bg-white border-b border-[#D6D8DF] flex flex-wrap items-center gap-2 md:gap-3 shrink-0">
         <span className="text-base md:text-sm font-bold text-[#1A1F36] shrink-0">카카오톡 인박스</span>
 
         {/* 보드 뷰 = 고객 전용 표시 */}
@@ -217,22 +251,45 @@ export function BoardView({
         </div>
       </div>
 
-      {/* 카드 가로 스크롤 영역 */}
-      <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
-        <div className="flex gap-3 h-full px-4 py-4" style={{ width: "max-content" }}>
-          {filtered.length === 0 ? (
-            <div className="flex items-center justify-center w-64 text-sm text-[#9CA3AF]">
-              채팅방이 없습니다
-            </div>
-          ) : (
-            filtered.map((c) => (
-              <MemoCard
-                key={c.id}
-                chat={c}
-                onOpenInbox={() => onSwitchToInbox(c.id)}
-              />
-            ))
-          )}
+      <div className="px-4 py-2 text-xs text-[#6B7280] min-h-9" role="status" aria-live="polite">
+        {notice || (isAdmin ? "카드를 끌거나 단계 메뉴로 이동하세요. 새 미확인 메시지가 오면 신규요청으로 돌아갑니다." : "업무 단계는 관리자가 변경할 수 있어요.")}
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 pt-0">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 items-start">
+          {BOARD_STAGES.map((stage) => {
+            const cards = filtered.filter((chat) => stateFor(chat).stage === stage.id);
+            return <section key={stage.id} aria-label={stage.label}
+              onDragOver={(event) => { if (isAdmin && dragging) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setOver(stage.id); } }}
+              onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(null); }}
+              onDrop={(event) => {
+                event.preventDefault();
+                const chat = filtered.find((item) => item.id === dragging);
+                setDragging(null); setOver(null);
+                if (chat) void move(chat, stage.id);
+              }}
+              className={`min-w-0 rounded-lg border p-2 min-h-44 ${over === stage.id ? "border-[#2959AA] bg-blue-50" : "border-[#D6D8DF] bg-[#ECEEF2]"}`}>
+              <h2 className="flex items-center gap-2 px-1 py-2 mb-2 text-sm font-semibold text-[#1A1F36]">
+                {stage.label}<span className="text-xs font-normal text-[#6B7280]">{cards.length}</span>
+              </h2>
+              <div className="space-y-3">
+                {cards.length === 0 && <p className="py-8 text-center text-xs text-[#6B7280]">채팅방이 없습니다</p>}
+                {cards.map((chat) => <div key={chat.id} className={dragging === chat.id ? "opacity-50" : ""}>
+                  {isAdmin && <div className="flex items-center justify-between gap-2 mb-1">
+                    <span draggable={!pending.includes(chat.id)} title="드래그하여 단계 이동"
+                      onDragStart={(event) => { event.dataTransfer.setData("text/plain", chat.id); event.dataTransfer.effectAllowed = "move"; setDragging(chat.id); }}
+                      onDragEnd={() => { setDragging(null); setOver(null); }}
+                      className="cursor-grab active:cursor-grabbing select-none text-xs text-[#6B7280] px-2 py-2">⠿ 이동</span>
+                    <select aria-label={`${chat.display_name} 업무 단계`} value={stateFor(chat).stage}
+                      disabled={pending.includes(chat.id)} onChange={(event) => void move(chat, event.target.value as BoardStage)}
+                      className="min-h-9 max-w-full rounded border border-[#D6D8DF] bg-white px-2 text-xs text-[#1A1F36] disabled:opacity-50">
+                      {BOARD_STAGES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                    </select>
+                  </div>}
+                  <MemoCard chat={chat} variant="grid" onOpenInbox={() => onSwitchToInbox(chat.id)} />
+                </div>)}
+              </div>
+            </section>;
+          })}
         </div>
       </div>
     </div>
