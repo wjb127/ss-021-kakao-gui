@@ -448,6 +448,10 @@ export function ChatView({
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchContextAbortRef = useRef<AbortController | null>(null);
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const quoteAbortRef = useRef<AbortController | null>(null);
+  const [quoteJump, setQuoteJump] = useState<{
+    chatId: string; targetId: string; messages: Message[]; busy: boolean; error: string | null;
+  } | null>(null);
   const previousChatIdRef = useRef<string | null>(null);
   const previousLastMessageIdRef = useRef<string | null>(null);
   const olderLoadInFlightRef = useRef(false);
@@ -668,6 +672,9 @@ export function ChatView({
     && !activeHitIsAvailable
     && searchContext.targetId !== activeSearchHit.id;
   const visibleMessagesById = new Map<string, Message>();
+  if (quoteJump?.chatId === chat?.id) {
+    for (const message of quoteJump?.messages ?? []) visibleMessagesById.set(message.id, message);
+  }
   for (const message of searchContextMessages) {
     visibleMessagesById.set(message.id, message);
   }
@@ -686,6 +693,50 @@ export function ChatView({
   const downloadBatch = downloadableMessages.slice(0, 20);
 
   const lastMessageId = sorted[sorted.length - 1]?.id ?? null;
+  async function jumpToQuotedMessage(targetId: string) {
+    if (!chat || !targetId) return;
+    quoteAbortRef.current?.abort();
+    const controller = new AbortController();
+    quoteAbortRef.current = controller;
+    nearBottomRef.current = false;
+    pendingPrependRef.current = null;
+    const previous = quoteJump?.chatId === chat.id ? quoteJump.messages : [];
+    const base = { chatId: chat.id, targetId, messages: previous, error: null };
+    if (messageRefs.current.has(targetId)) {
+      setQuoteJump({ ...base, busy: false });
+      return;
+    }
+    setQuoteJump({ ...base, busy: true });
+    try {
+      const params = new URLSearchParams({ chatId: chat.id, aroundMessageId: targetId, radius: "60", sync: "0" });
+      const response = await fetch(`/api/messages?${params}`, { signal: controller.signal, cache: "no-store" });
+      if (!response.ok) throw new Error(response.status === 404
+        ? "원본 메시지를 찾을 수 없어요. 대화를 새로고침한 뒤 다시 시도해 주세요."
+        : "원본 메시지를 불러오지 못했어요. 다시 시도해 주세요.");
+      const data = await response.json() as { messages?: Message[] };
+      if (!Array.isArray(data.messages) || !data.messages.some((message) => message.id === targetId)) {
+        throw new Error("원본 메시지를 찾을 수 없어요.");
+      }
+      if (!controller.signal.aborted) setQuoteJump({ ...base, messages: mergeExportMessages(previous, data.messages), busy: false });
+    } catch (error) {
+      if (!controller.signal.aborted) setQuoteJump({ ...base, busy: false, error: error instanceof Error ? error.message : "원본 메시지를 불러오지 못했어요." });
+    }
+  }
+
+  useEffect(() => () => { quoteAbortRef.current?.abort(); }, [chat?.id]);
+
+  useLayoutEffect(() => {
+    if (!quoteJump || quoteJump.chatId !== chat?.id || quoteJump.busy || quoteJump.error) return;
+    const frame = requestAnimationFrame(() => {
+      const element = messageRefs.current.get(quoteJump.targetId);
+      if (!element) return;
+      element.scrollIntoView({ block: "center", behavior: "auto" });
+      if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        element.animate([{ backgroundColor: "#FFF0B3" }, { backgroundColor: "transparent" }], { duration: 2200 });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [quoteJump, chat?.id]);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -1225,6 +1276,11 @@ export function ChatView({
       )}
 
       {/* 메시지 스크롤 영역 */}
+      {quoteJump?.chatId === chat?.id && (quoteJump?.busy || quoteJump?.error) && (
+        <div role="status" className="px-4 py-2 text-xs text-[#6B7280] bg-[#FFF8D6]">
+          {quoteJump.busy ? "원본 메시지 불러오는 중…" : quoteJump.error}
+        </div>
+      )}
       <div className="relative min-h-0 flex-1">
       <div
         ref={scrollRef}
@@ -1343,8 +1399,11 @@ export function ChatView({
                             </div>
                           )}
                           {m.reply && (
-                            <div
-                              className={`mb-1.5 border-l-2 pl-2 py-0.5 ${
+                            <button type="button"
+                              onClick={() => void jumpToQuotedMessage(m.reply!.messageId)}
+                              title="원본 메시지로 이동"
+                              aria-label={`${m.reply.senderName || m.reply.senderId.slice(-6)}의 원본 메시지로 이동`}
+                              className={`block w-full text-left mb-1.5 border-l-2 pl-2 py-0.5 cursor-pointer hover:bg-black/5 focus-visible:outline-2 focus-visible:outline-[#F2C94C] ${
                                 m.is_from_me
                                   ? "border-blue-200 text-blue-100"
                                   : "border-[#9CA3AF] text-[#6B7280]"
@@ -1356,7 +1415,7 @@ export function ChatView({
                               <div className="text-[11px] leading-4 line-clamp-2 whitespace-pre-wrap break-words">
                                 {replyPreview(m)}
                               </div>
-                            </div>
+                            </button>
                           )}
                           <div className="whitespace-pre-wrap break-words select-text cursor-text">
                             {isMediaMessage(m) ? (

@@ -31,6 +31,7 @@ let sourceCalls = 0;
 const room = { id: "123", display_name: "대화", member_count: 2 };
 const chats = loadRoute("app/api/chats/route.ts", {
   "next/server": next,
+  "@/lib/board-store": { getBoardState: () => ({ stage: "new", revision: 0 }) },
   "@/lib/kakaocli": {
     getChatSnapshot: () => [room],
     listChats: async () => { sourceCalls++; return [room]; },
@@ -59,11 +60,17 @@ const messages = loadRoute("app/api/messages/route.ts", {
   },
   "@/lib/kakao-events": { normalizeKakaoEvents: (value: unknown) => value },
   "@/lib/store": {
+    getCachedMessageContext: (_chatId: string, id: string) => id === "quoted" ? [{ id: "quoted", type: "text" }] : [],
     getCachedMessageCount: () => count,
     getCachedMessagePage: () => page,
     upsertMessages: () => {},
   },
 });
+const quoted = await messages(request("chatId=123&aroundMessageId=quoted&sync=0"));
+assert.equal(quoted.status, 200);
+assert.equal((await quoted.json()).targetId, "quoted");
+assert.equal((await messages(request("chatId=123&aroundMessageId=missing&sync=0"))).status, 404);
+assert.equal(sourceWindow, "", "원문 위치 조회는 저장된 대화에서 찾아야 한다");
 await messages(request("chatId=123&memberCount=2&paginated=1&sync=0"));
 assert.equal(sourceWindow, "", "캐시 조회에서 원본을 호출하면 안 된다");
 await messages(request("chatId=123&memberCount=2&paginated=1&beforeTimestamp=2026-01-01&beforeId=1"));
