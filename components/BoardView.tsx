@@ -2,7 +2,7 @@
 import { useIsAdmin } from "./TeamShell";
 
 // 보드 뷰 — 채팅방별 업무 단계 관리
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Category, Chat } from "@/lib/types";
 import { ViewSwitcher } from "./ViewSwitcher";
 import { BOARD_STAGES, type BoardStage, type BoardState } from "@/lib/board-types";
@@ -48,10 +48,12 @@ export function MemoCard({
   chat,
   onOpenInbox,
   variant = "horizontal",
+  controls,
 }: {
   chat: Chat;
   onOpenInbox: () => void;
   variant?: "horizontal" | "grid";
+  controls?: ReactNode;
 }) {
   const readOnly = !useIsAdmin();
   const [memo, setMemo] = useState("");
@@ -127,6 +129,7 @@ export function MemoCard({
           </button>
       </div>
 
+      {controls && <div className="flex items-center justify-between gap-2 px-2 pb-1">{controls}</div>}
       {/* 접힌 상태에서는 메모 영역의 여백도 숨긴다. */}
       <div className={memoOpen ? "flex-1 flex flex-col p-2 min-h-0" : "hidden"}>
         {saved && <span className="text-[9px] text-green-500 mb-1">저장됨</span>}
@@ -154,6 +157,7 @@ export function BoardView({
   const [overrides, setOverrides] = useState<Record<string, BoardState>>({});
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<BoardStage | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; after: boolean } | null>(null);
   const [pending, setPending] = useState<string[]>([]);
   const pendingRef = useRef(new Set<string>());
   const [notice, setNotice] = useState("");
@@ -162,22 +166,23 @@ export function BoardView({
     const local = overrides[chat.id];
     return local && local.revision > server.revision ? local : server;
   }
-  async function move(chat: Chat, stage: BoardStage) {
-    if (!isAdmin || pendingRef.current.has(chat.id) || stateFor(chat).stage === stage) return;
+  async function move(chat: Chat, stage: BoardStage, order?: Chat[]) {
+    if (!isAdmin || pendingRef.current.size > 0 || (!order && stateFor(chat).stage === stage)) return;
     pendingRef.current.add(chat.id);
     setPending([...pendingRef.current]);
     setNotice("");
     try {
       const response = await fetch("/api/board", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId: chat.id, stage, revision: stateFor(chat).revision }),
+        body: JSON.stringify({ chatId: chat.id, stage, revision: stateFor(chat).revision,
+          order: order?.map((item) => ({ id: item.id, revision: stateFor(item).revision })) }),
       });
       const result = await response.json();
       if (response.ok || response.status === 409) {
-        setOverrides((previous) => ({ ...previous, [chat.id]: { stage: result.stage, revision: result.revision } }));
+        setOverrides((previous) => ({ ...previous, ...result.states, [chat.id]: { stage: result.stage, revision: result.revision, position: result.position } }));
       }
-      if (!response.ok) throw new Error(result.error || "단계를 저장하지 못했어요.");
-      setNotice(`${chat.display_name} · ${BOARD_STAGES.find((item) => item.id === stage)?.label} 단계로 이동했어요.`);
+      if (!response.ok) { onRefresh(); throw new Error(result.error || "변경을 저장하지 못했어요."); }
+      setNotice(`${chat.display_name} · ${order ? "카드 순서를 저장했어요." : `${BOARD_STAGES.find((item) => item.id === stage)?.label} 단계로 이동했어요.`}`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "단계를 저장하지 못했어요. 다시 시도해 주세요.");
     } finally {
@@ -188,7 +193,19 @@ export function BoardView({
   // 보드 뷰는 고객 카테고리만 강제
   const filtered = [...chats]
     .filter((c) => c.category === "client")
-    .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at));
+    .sort((a, b) => (stateFor(a).position ?? 0) - (stateFor(b).position ?? 0)
+      || b.last_message_at.localeCompare(a.last_message_at) || a.id.localeCompare(b.id));
+
+  function drop(stage: BoardStage, target?: { id: string; after: boolean }) {
+    const chat = filtered.find((item) => item.id === dragging);
+    setDragging(null); setOver(null); setDropTarget(null);
+    if (!chat || target?.id === chat.id) return;
+    const ordered = filtered.filter((item) => stateFor(item).stage === stage && item.id !== chat.id);
+    const index = target ? ordered.findIndex((item) => item.id === target.id) : ordered.length;
+    if (index < 0) return;
+    ordered.splice(index + (target?.after ? 1 : 0), 0, chat);
+    void move(chat, stage, ordered);
+  }
 
   return (
     <div className="flex flex-col h-screen bg-[#F5F6F8] overflow-hidden">
@@ -263,13 +280,11 @@ export function BoardView({
           {BOARD_STAGES.map((stage) => {
             const cards = filtered.filter((chat) => stateFor(chat).stage === stage.id);
             return <section key={stage.id} aria-label={stage.label}
-              onDragOver={(event) => { if (isAdmin && dragging) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setOver(stage.id); } }}
+              onDragOver={(event) => { if (isAdmin && dragging) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setOver(stage.id); setDropTarget(null); } }}
               onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(null); }}
               onDrop={(event) => {
                 event.preventDefault();
-                const chat = filtered.find((item) => item.id === dragging);
-                setDragging(null); setOver(null);
-                if (chat) void move(chat, stage.id);
+                drop(stage.id);
               }}
               className={`min-w-0 rounded-lg border p-2 min-h-44 ${over === stage.id ? "border-[#2959AA] bg-blue-50" : "border-[#D6D8DF] bg-[#ECEEF2]"}`}>
               <h2 className="flex items-center gap-2 px-1 py-2 mb-2 text-sm font-semibold text-[#1A1F36]">
@@ -277,19 +292,30 @@ export function BoardView({
               </h2>
               <div className="space-y-3">
                 {cards.length === 0 && <p className="py-8 text-center text-xs text-[#6B7280]">채팅방이 없습니다</p>}
-                {cards.map((chat) => <div key={chat.id} className={dragging === chat.id ? "opacity-50" : ""}>
-                  {isAdmin && <div className="flex items-center justify-between gap-2 mb-1">
-                    <span draggable={!pending.includes(chat.id)} title="드래그하여 단계 이동"
+                {cards.map((chat) => <div key={chat.id} data-board-chat-id={chat.id}
+                  onDragOver={(event) => {
+                    if (!isAdmin || !dragging) return;
+                    event.preventDefault(); event.stopPropagation();
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setOver(stage.id); setDropTarget({ id: chat.id, after: event.clientY > rect.top + rect.height / 2 });
+                  }}
+                  onDrop={(event) => { event.preventDefault(); event.stopPropagation();
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    drop(stage.id, { id: chat.id, after: event.clientY > rect.top + rect.height / 2 });
+                  }}
+                  className={`relative ${dragging === chat.id ? "opacity-50" : ""}`}>
+                  {dragging !== chat.id && dropTarget?.id === chat.id && <div className={`pointer-events-none absolute left-0 right-0 h-0.5 bg-[#2959AA] ${dropTarget.after ? "-bottom-1.5" : "-top-1.5"}`} />}
+                  <MemoCard chat={chat} variant="grid" onOpenInbox={() => onSwitchToInbox(chat.id)} controls={isAdmin && <>
+                    <span draggable={pending.length === 0} title="드래그하여 순서 또는 단계 이동"
                       onDragStart={(event) => { event.dataTransfer.setData("text/plain", chat.id); event.dataTransfer.effectAllowed = "move"; setDragging(chat.id); }}
-                      onDragEnd={() => { setDragging(null); setOver(null); }}
-                      className="cursor-grab active:cursor-grabbing select-none text-xs text-[#6B7280] px-2 py-2">⠿ 이동</span>
+                      onDragEnd={() => { setDragging(null); setOver(null); setDropTarget(null); }}
+                      className="cursor-grab active:cursor-grabbing select-none text-xs text-[#6B7280] px-1 py-1">⠿ 이동</span>
                     <select aria-label={`${chat.display_name} 업무 단계`} value={stateFor(chat).stage}
-                      disabled={pending.includes(chat.id)} onChange={(event) => void move(chat, event.target.value as BoardStage)}
-                      className="min-h-9 max-w-full rounded border border-[#D6D8DF] bg-white px-2 text-xs text-[#1A1F36] disabled:opacity-50">
+                      disabled={pending.length > 0} onChange={(event) => void move(chat, event.target.value as BoardStage)}
+                      className="min-h-7 max-w-full rounded border border-[#D6D8DF] bg-white px-1 text-[11px] text-[#1A1F36] disabled:opacity-50">
                       {BOARD_STAGES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                     </select>
-                  </div>}
-                  <MemoCard chat={chat} variant="grid" onOpenInbox={() => onSwitchToInbox(chat.id)} />
+                  </>} />
                 </div>)}
               </div>
             </section>;

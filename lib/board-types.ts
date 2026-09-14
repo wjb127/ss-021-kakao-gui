@@ -5,7 +5,8 @@ export const BOARD_STAGES = [
   { id: "answered", label: "응대완료" },
 ] as const;
 export type BoardStage = typeof BOARD_STAGES[number]["id"];
-export interface BoardState { stage: BoardStage; revision: number }
+export interface BoardState { stage: BoardStage; revision: number; position?: number }
+export interface BoardOrderEntry { id: string; revision: number }
 export function isBoardStage(value: unknown): value is BoardStage {
   return BOARD_STAGES.some((stage) => stage.id === value);
 }
