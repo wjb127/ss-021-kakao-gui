@@ -55,6 +55,14 @@ async function main() {
   const { getDb } = await import("../lib/db");
   const stored = getDb().prepare("SELECT stage FROM chat_board WHERE chat_id = ?").get(chat.id) as { stage: string };
   assert.equal(stored.stage, "answered");
+  for (const stage of ["reviewed", "payment"] as const) {
+    const revision = getBoardState(chat.id).revision;
+    assert.equal((await POST(request(readerToken, stage, revision))).status, 403);
+    assert.equal((await POST(request(token, stage, revision))).status, 200);
+    assert.equal(getBoardState(chat.id).stage, stage);
+    observeBoardChats([{ ...chat, unread_count: stage === "reviewed" ? 2 : 3, last_message_at: "2026-09-14T10:00:00Z" }]);
+    assert.equal(getBoardState(chat.id).stage, "new", "추가 단계에서도 새 수신은 응대필요로 복귀한다");
+  }
   const order = ["b", "a", "c"].map((id) => ({ id, revision: 0 }));
   assert.equal(moveBoardChat("b", "new", 0, order).ok, true);
   assert.deepEqual(order.map((entry) => getBoardState(entry.id).position), [1, 2, 3]);

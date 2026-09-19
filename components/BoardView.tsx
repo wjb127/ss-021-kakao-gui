@@ -276,7 +276,7 @@ export function BoardView({
         {notice || (isAdmin ? "카드를 끌거나 단계 메뉴로 이동하세요. 새 미확인 메시지가 오면 응대필요로 돌아갑니다." : "업무 단계는 관리자가 변경할 수 있어요.")}
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto p-3 pt-0">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 items-start">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 min-[1800px]:grid-cols-6 gap-3 items-start">
           {BOARD_STAGES.map((stage) => {
             const cards = filtered.filter((chat) => stateFor(chat).stage === stage.id);
             return <section key={stage.id} aria-label={stage.label}
