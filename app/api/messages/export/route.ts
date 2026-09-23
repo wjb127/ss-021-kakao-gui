@@ -14,8 +14,13 @@ async function handleGET(req: NextRequest) {
   if (!chatId || (scope !== "all" && scope !== "recent")) {
     return NextResponse.json({ error: "채팅방과 복사 범위를 확인해 주세요." }, { status: 400 });
   }
+  const rawDays = req.nextUrl.searchParams.get("days") ?? "2";
+  const days = Number(rawDays);
+  if (scope === "recent" && (!/^\d+$/.test(rawDays) || !Number.isSafeInteger(days) || days < 1 || days > 3650)) {
+    return NextResponse.json({ error: "복사 일수는 1~3650 사이의 정수로 입력해 주세요." }, { status: 400 });
+  }
   const since = scope === "recent"
-    ? new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
+    ? new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
     : undefined;
   const messages = normalizeKakaoEvents(getCachedMessages(chatId, since));
   const sourcePath = !chatId.startsWith("manual_") && process.env.KAKAOCLI_DB

@@ -2,7 +2,7 @@
 import { useIsAdmin } from "./TeamShell";
 
 // 메시지 뷰 - 가운데 패널
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import type { Chat, Message } from "@/lib/types";
 import { parseKmong } from "@/lib/kmong-parser";
 import { copyDeferredText } from "@/lib/clipboard";
@@ -39,6 +39,8 @@ interface Props {
   onOpenSettings?: () => void;
   onAttachmentDownloaded?: (messageId: string, filePath: string) => void;
   onMessageSent?: (message: Message) => void;
+  onOpenWork?: () => void;
+  messageTarget?: { chatId: string; id: string; nonce: number } | null;
 }
 
 function dateKey(iso: string): string {
@@ -437,6 +439,8 @@ export function ChatView({
   onOpenSettings,
   onAttachmentDownloaded,
   onMessageSent,
+  onOpenWork,
+  messageTarget,
 }: Props) {
   const readOnly = !useIsAdmin();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -463,6 +467,8 @@ export function ChatView({
   } | null>(null);
   const [rawMode, setRawMode] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyDays, setCopyDays] = useState(String(RECENT_COPY_DAYS));
+  const validCopyDays = /^\d+$/.test(copyDays) && Number(copyDays) >= 1 && Number(copyDays) <= 3650;
   const [copyBusy, setCopyBusy] = useState<"all" | "recent" | null>(null);
   const copyBusyRef = useRef(false);
   const [copied2d, setCopied2d] = useState<"ok" | "none" | null>(null);
@@ -723,6 +729,15 @@ export function ChatView({
     }
   }
 
+  const openWorkMessage = useEffectEvent((id: string) => {
+    setSearchOpen(false);
+    setRawMode(false);
+    void jumpToQuotedMessage(id);
+  });
+  useEffect(() => {
+    if (messageTarget && messageTarget.chatId === chat?.id) openWorkMessage(messageTarget.id);
+  }, [messageTarget, chat?.id]);
+
   useEffect(() => () => { quoteAbortRef.current?.abort(); }, [chat?.id]);
 
   useLayoutEffect(() => {
@@ -902,13 +917,15 @@ export function ChatView({
     await handleCopyScope("all");
   }
 
-  // 최근 2일치만 복사 (기준: 현재 시각 - 2일)
+  // 현재 시각부터 지정한 일수만큼 거슬러 복사한다.
   async function handleCopyRecent() {
     await handleCopyScope("recent");
   }
 
   async function handleCopyScope(scope: "all" | "recent") {
     if (!chat || copyBusyRef.current) return;
+    if (scope === "recent" && !validCopyDays) return;
+    const days = Number(copyDays);
     const chatId = chat.id;
     copyBusyRef.current = true;
     setCopyBusy(scope);
@@ -918,6 +935,7 @@ export function ChatView({
       await copyDeferredText(async () => {
         try {
           const params = new URLSearchParams({ chatId, scope });
+          if (scope === "recent") params.set("days", String(days));
           const response = await fetch(`/api/messages/export?${params}`, { cache: "no-store" });
           if (!response.ok) throw new Error("대화를 가져오지 못했습니다. 다시 시도해 주세요.");
           const data = await response.json() as { messages: Message[]; since?: string; sourceLine?: string };
@@ -927,7 +945,7 @@ export function ChatView({
           );
           const text = toPlainText(selected);
           count = selected.length;
-          if (!text) throw new Error(scope === "recent" ? "최근 2일간 복사할 대화가 없습니다." : "복사할 대화가 없습니다.");
+          if (!text) throw new Error(scope === "recent" ? `최근 ${days}일간 복사할 대화가 없습니다.` : "복사할 대화가 없습니다.");
           return data.sourceLine ? `${text}\n\n${data.sourceLine}` : text;
         } catch (error) {
           loadError = error instanceof Error ? error.message : "대화를 가져오지 못했습니다.";
@@ -1152,10 +1170,25 @@ export function ChatView({
               대화복원
             </button>
           )}
-          {/* 최근 2일치 복사 */}
+          {/* 지정한 일수만큼 복사 */}
+          {onOpenWork && <button onClick={onOpenWork} className="md:hidden rounded bg-[#E8E9EC] px-2 py-1.5 text-[11px] whitespace-nowrap">업무</button>}
+          <div className="inline-flex items-center gap-1 shrink-0">
+          <input
+            type="number"
+            min={1}
+            max={3650}
+            step={1}
+            aria-label="복사할 최근 일수"
+            title="복사할 최근 일수 (1~3650일)"
+            aria-invalid={!validCopyDays}
+            value={copyDays}
+            disabled={copyBusy !== null}
+            onChange={(event) => { setCopyDays(event.target.value); setCopied2d(null); }}
+            className="w-14 text-[11px] px-1.5 py-1.5 md:py-1 rounded border border-[#D6D8DF] bg-white text-[#1A1F36] disabled:opacity-60"
+          />
           <button
             onClick={handleCopyRecent}
-            disabled={copyBusy !== null}
+            disabled={copyBusy !== null || !validCopyDays}
             className={`text-[11px] px-2 py-1.5 md:py-1 rounded whitespace-nowrap disabled:opacity-60 transition-colors ${
               copied2d === "ok"
                 ? "bg-green-500 text-white"
@@ -1163,14 +1196,15 @@ export function ChatView({
                   ? "bg-[#FDE8E8] text-[#B23434]"
                   : "bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
             }`}
-            title={copied2d === "ok" ? `${copied2dCount}건 복사됨` : `저장된 최근 ${RECENT_COPY_DAYS}일치 대화 복사`}
+            title={copied2d === "ok" ? `${copied2dCount}건 복사됨` : `저장된 최근 ${copyDays}일치 대화 복사`}
           >
             {copied2d === "ok"
               ? "복사됨"
               : copied2d === "none"
-                ? "2일치 없음"
-                : copyBusy === "recent" ? "준비 중" : `${RECENT_COPY_DAYS}일복사`}
+                ? "대화 없음"
+                : copyBusy === "recent" ? "준비 중" : "일복사"}
           </button>
+          </div>
           {/* 전체 복사 버튼 */}
           <button
             onClick={handleCopy}
@@ -1182,7 +1216,7 @@ export function ChatView({
             }`}
             title="저장된 전체 대화 복사"
           >
-            {copied ? "복사됨" : copyBusy === "all" ? "준비 중" : "복사"}
+            {copied ? "복사됨" : copyBusy === "all" ? "준비 중" : "전체복사"}
           </button>
         </div>
       </div>

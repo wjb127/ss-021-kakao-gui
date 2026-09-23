@@ -37,6 +37,14 @@ assert.equal(cutoff, undefined);
 const now = Date.now();
 await route.GET(req("chatId=123&scope=recent"));
 assert.ok(Math.abs(new Date(cutoff!).getTime() - (now - 172800000)) < 1000);
+for (const days of [1, 7, 30, 3650]) {
+  const started = Date.now();
+  assert.equal((await route.GET(req(`chatId=123&scope=recent&days=${days}`))).status, 200);
+  assert.ok(Math.abs(new Date(cutoff!).getTime() - (started - days * 86400000)) < 1000);
+}
+for (const days of ["", "0", "-1", "1.5", "abc", "3651", "Infinity"]) {
+  assert.equal((await route.GET(req(`chatId=123&scope=recent&days=${days}`))).status, 400);
+}
 assert.equal((await route.GET(req("scope=all"))).status, 400);
 assert.equal((await route.GET(req("chatId=123&scope=wrong"))).status, 400);
 

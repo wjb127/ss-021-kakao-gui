@@ -6,10 +6,14 @@ import { useEffect, useRef, useState } from "react";
 import type { Analysis, Chat, Urgency } from "@/lib/types";
 import { AI_ANALYSIS_ENABLED } from "@/lib/feature-flags";
 import { ClaudeRunModal } from "./ClaudeRunModal";
+import { WorkPanel } from "./WorkPanel";
+import type { BoardState } from "@/lib/board-types";
 
 interface Props {
   chat: Chat | null;
   onCloseMobile?: () => void;
+  onBoardChange: (state: BoardState) => void;
+  onOpenMessage: (id: string) => void;
 }
 
 const URGENCY_STYLE: Record<Urgency, string> = {
@@ -23,7 +27,7 @@ function formatTimestamp(iso: string): string {
   try { return new Date(iso).toLocaleString("ko-KR"); } catch { return iso; }
 }
 
-type Tab = "분석" | "답변" | "메모" | "연동";
+type Tab = "업무" | "분석" | "답변" | "메모" | "연동";
 type Tone = "formal" | "casual" | "brief";
 
 interface ProjectSuggestion {
@@ -41,8 +45,8 @@ const TONE_LABEL: Record<Tone, string> = {
   brief: "간결",
 };
 
-export function AIPanel({ chat, onCloseMobile }: Props) {
-  const [tab, setTab] = useState<Tab>("분석");
+export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: Props) {
+  const [tab, setTab] = useState<Tab>("업무");
 
   // ── 분석 탭 ──────────────────────────────────────────────
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -327,7 +331,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
             ×
           </button>
         )}
-        채팅을 선택하면 AI 분석이 표시됩니다
+        채팅을 선택하면 업무 정보를 확인할 수 있어요.
       </div>
     );
   }
@@ -375,7 +379,7 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
         </div>
         {/* 탭 */}
         <div className="flex gap-0">
-          {(["분석", "답변", "메모", "연동"] as Tab[]).map((t) => (
+          {(["업무", "분석", "답변", "메모", "연동"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -391,8 +395,9 @@ export function AIPanel({ chat, onCloseMobile }: Props) {
         </div>
       </div>
 
+      <WorkPanel key={chat.id} chat={chat} active={tab === "업무"} onBoardChange={onBoardChange} onOpenMessage={onOpenMessage} onMemo={() => setTab("메모")} />
       {/* 탭 컨텐츠 */}
-      <div className="flex-1 overflow-y-auto">
+      <div className={tab === "업무" ? "hidden" : "flex-1 min-h-0 overflow-y-auto"}>
 
         {/* ── 분석 탭 ── */}
         {tab === "분석" && (

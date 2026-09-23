@@ -76,6 +76,7 @@ export default function Home() {
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [restoreChatId, setRestoreChatId] = useState<string | null>(null);
   const [mobileAIOpen, setMobileAIOpen] = useState(false);
+  const [messageTarget, setMessageTarget] = useState<{ chatId: string; id: string; nonce: number } | null>(null);
   const chatsRequestRef = useRef<Promise<void> | null>(null);
   const messagesRequestRef = useRef<Map<string, Promise<void>>>(new Map());
   const selectedChatIdRef = useRef<string | null>(null);
@@ -546,6 +547,8 @@ export default function Home() {
         >
           <ChatView
             chat={selectedChat}
+            messageTarget={messageTarget}
+            onOpenWork={() => setMobileAIOpen(true)}
             messages={messages}
             loading={messagesLoading}
             loadingOlder={olderMessagesLoading}
@@ -607,6 +610,12 @@ export default function Home() {
           <AIPanel
             chat={selectedChat}
             onCloseMobile={() => setMobileAIOpen(false)}
+            onBoardChange={(board) => setChats((previous) => previous.map((item) => item.id === selectedChatId ? { ...item, board } : item))}
+            onOpenMessage={(id) => {
+              if (!selectedChatId) return;
+              setMessageTarget({ chatId: selectedChatId, id, nonce: Date.now() });
+              setMobileAIOpen(false);
+            }}
           />
         </div>
       </div>
