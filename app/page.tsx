@@ -98,9 +98,11 @@ export default function Home() {
     if (chatParam) {
       setSelectedChatId(chatParam);
       setView("inbox");
+      if (params.get("work") === "1") setMobileAIOpen(true);
       // 쿼리스트링 제거 (뒤로가기 시 누적 방지)
       const url = new URL(window.location.href);
       url.searchParams.delete("chat");
+      url.searchParams.delete("work");
       window.history.replaceState({}, "", url.toString());
     }
   }, []);
@@ -136,6 +138,17 @@ export default function Home() {
   }, []);
 
   useEffect(() => { void loadChats(); }, [loadChats]);
+
+  // 목록 상한 밖의 오래된 대화도 할 일에서 바로 열 수 있게 조회한다.
+  useEffect(() => {
+    if (!selectedChatId || chatsLoading || chats.some((chat) => chat.id === selectedChatId)) return;
+    const controller = new AbortController();
+    fetch(`/api/chats?chatId=${encodeURIComponent(selectedChatId)}`, { signal: controller.signal })
+      .then(async (response) => { if (!response.ok) return; const found: Chat[] = await response.json();
+        if (found.length) setChats((previous) => [...previous.filter((chat) => chat.id !== selectedChatId), ...found]); })
+      .catch(() => { /* 대화 목록의 다음 갱신에서 다시 확인한다. */ });
+    return () => controller.abort();
+  }, [selectedChatId, chatsLoading, chats]);
 
   const loadMessages = useCallback((
     chatId: string,

@@ -13,6 +13,10 @@ export function getChatWork(chatId: string): ChatWork {
   const row = db().prepare("SELECT revision, document FROM chat_work WHERE chat_id = ?").get(chatId) as { revision: number; document: string } | undefined;
   return row ? { ...JSON.parse(row.document), revision: row.revision } : { ...EMPTY_WORK, items: [] };
 }
+export function listChatWork(): { chatId: string; work: ChatWork }[] {
+  return (db().prepare("SELECT chat_id, revision, document FROM chat_work").all() as { chat_id: string; revision: number; document: string }[])
+    .map((row) => ({ chatId: row.chat_id, work: { ...JSON.parse(row.document), revision: row.revision } }));
+}
 // 팀원이 동시에 저장하면 뒤늦은 요청으로 앞선 변경을 덮어쓰지 않는다.
 export function saveChatWork(chatId: string, work: ChatWork) {
   const connection = db();
