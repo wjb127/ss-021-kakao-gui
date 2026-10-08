@@ -74,6 +74,8 @@ export interface MessagePage {
   total: number;
   deletedMessageIds?: string[];
   historyPending?: boolean;
+  syncPending?: boolean;
+  syncFailed?: boolean;
 }
 
 export type Urgency = "Low" | "Medium" | "High" | "Critical";

@@ -18,6 +18,7 @@ const URGENCY_STYLE: Record<Urgency, string> = {
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
+    if (!iso || Number.isNaN(d.getTime())) return "";
     const now = new Date();
     const sameDay =
       d.getFullYear() === now.getFullYear() &&

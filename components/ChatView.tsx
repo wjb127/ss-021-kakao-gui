@@ -36,10 +36,9 @@ interface Props {
   onRefresh: () => void;
   onRestore?: () => void;
   onBack?: () => void;
-  onOpenSettings?: () => void;
   onAttachmentDownloaded?: (messageId: string, filePath: string) => void;
-  onMessageSent?: (message: Message) => void;
   onOpenWork?: () => void;
+  onOpenReply?: () => void;
   messageTarget?: { chatId: string; id: string; nonce: number } | null;
 }
 
@@ -436,18 +435,15 @@ export function ChatView({
   onRefresh,
   onRestore,
   onBack,
-  onOpenSettings,
   onAttachmentDownloaded,
-  onMessageSent,
   onOpenWork,
+  onOpenReply,
   messageTarget,
 }: Props) {
   const readOnly = !useIsAdmin();
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchComposingRef = useRef(false);
-  const replyInputRef = useRef<HTMLTextAreaElement>(null);
-  const replyComposingRef = useRef(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchContextAbortRef = useRef<AbortController | null>(null);
@@ -492,11 +488,6 @@ export function ChatView({
     messages: [],
     error: null,
   });
-  const [replyInput, setReplyInput] = useState("");
-  const [replySending, setReplySending] = useState(false);
-  const [replyError, setReplyError] = useState<string | null>(null);
-  const [replySent, setReplySent] = useState(false);
-  const [sendEnabled, setSendEnabled] = useState(false);
 
   const isManual = !!chat?.id?.startsWith("manual_");
 
@@ -575,43 +566,6 @@ export function ChatView({
     setSearchIndex((current) =>
       (current + direction + searchHits.length) % searchHits.length,
     );
-  }
-
-  async function handleReplySend() {
-    const text = replyInputRef.current?.value.trim() ?? "";
-    if (!chat || isManual || replySending || replyComposingRef.current || !text) return;
-    const targetName = chat.member_count === 1
-      ? "나와의 채팅"
-      : chat.display_name || `(멤버 ${chat.member_count}명)`;
-    if (!window.confirm(`${targetName}에 아래 메시지를 전송할까요?\n\n${text}`)) return;
-
-    setReplySending(true);
-    setReplyError(null);
-    setReplySent(false);
-    try {
-      const response = await fetch("/api/send-message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId: chat.id, text, confirmed: true }),
-      });
-      const data = (await response.json()) as {
-        error?: string;
-        message?: Message;
-      };
-      if (!response.ok || !data.message) {
-        setReplyError(data.error || "메시지 발송 실패");
-        return;
-      }
-      if (replyInputRef.current) replyInputRef.current.value = "";
-      setReplyInput("");
-      setReplySent(true);
-      onMessageSent?.(data.message);
-      setTimeout(() => setReplySent(false), 2000);
-    } catch (error) {
-      setReplyError(String(error));
-    } finally {
-      setReplySending(false);
-    }
   }
 
   async function handleManualSend(mode: "replace" | "append") {
@@ -830,24 +784,13 @@ export function ChatView({
     setSearchTruncated(false);
     setSearchContext({ targetId: null, messages: [], error: null });
     if (searchInputRef.current) searchInputRef.current.value = "";
-    if (replyInputRef.current) replyInputRef.current.value = "";
     searchComposingRef.current = false;
-    replyComposingRef.current = false;
-    setReplyInput("");
-    setReplySending(false);
-    setReplyError(null);
-    setReplySent(false);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchAbortRef.current?.abort();
     searchContextAbortRef.current?.abort();
   }, [chat?.id]);
 
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((response) => response.json())
-      .then((settings) => setSendEnabled(settings.send_enabled === "1"))
-      .catch(() => setSendEnabled(false));
-  }, [chat?.id]);
+
 
   useEffect(() => {
     function handleFindShortcut(event: KeyboardEvent) {
@@ -937,7 +880,10 @@ export function ChatView({
           const params = new URLSearchParams({ chatId, scope });
           if (scope === "recent") params.set("days", String(days));
           const response = await fetch(`/api/messages/export?${params}`, { cache: "no-store" });
-          if (!response.ok) throw new Error("대화를 가져오지 못했습니다. 다시 시도해 주세요.");
+          if (!response.ok) {
+            const failure = await response.json().catch(() => null) as { error?: string } | null;
+            throw new Error(failure?.error || "대화를 가져오지 못했습니다. 다시 시도해 주세요.");
+          }
           const data = await response.json() as { messages: Message[]; since?: string; sourceLine?: string };
           // 캐시하지 않는 큰 방의 현재 메시지도 기존처럼 복사할 수 있게 합친다.
           const selected = mergeExportMessages(messages, data.messages).filter((message) =>
@@ -1171,6 +1117,7 @@ export function ChatView({
             </button>
           )}
           {/* 지정한 일수만큼 복사 */}
+          {!readOnly && onOpenReply && <button onClick={onOpenReply} className="rounded bg-[#2959AA] px-2 py-1.5 text-[11px] text-white whitespace-nowrap">답변</button>}
           {onOpenWork && <button onClick={onOpenWork} className="md:hidden rounded bg-[#E8E9EC] px-2 py-1.5 text-[11px] whitespace-nowrap">업무</button>}
           <div className="inline-flex items-center gap-1 shrink-0">
           <input
@@ -1502,70 +1449,6 @@ export function ChatView({
       </div>
 
       {readOnly && <div className="border-t border-[#D6D8DF] bg-white px-4 py-3 text-xs text-slate-500">읽기 전용 · 메시지 발송과 내용 변경은 관리자만 할 수 있어요.</div>}
-      {!readOnly && !isManual && (
-        <div className="shrink-0 border-t border-[#D6D8DF] bg-white px-3 py-2">
-          {replyError && (
-            <div className="mb-1.5 text-[10px] text-[#B23434]">{replyError}</div>
-          )}
-          <div className="flex items-end gap-2">
-            <textarea
-              ref={replyInputRef}
-              defaultValue=""
-              onChange={(event) => {
-                if (replyComposingRef.current) return;
-                setReplyInput(event.target.value);
-                setReplyError(null);
-                setReplySent(false);
-              }}
-              onCompositionStart={() => { replyComposingRef.current = true; }}
-              onCompositionEnd={(event) => {
-                replyComposingRef.current = false;
-                setReplyInput(event.currentTarget.value);
-                setReplyError(null);
-                setReplySent(false);
-              }}
-              onKeyDown={(event) => {
-                if (
-                  event.key === "Enter"
-                  && !event.shiftKey
-                  && !event.nativeEvent.isComposing
-                  && !replyComposingRef.current
-                ) {
-                  event.preventDefault();
-                  void handleReplySend();
-                }
-              }}
-              rows={2}
-              placeholder={chat.member_count === 1 ? "나와의 채팅에 메시지 입력" : "카카오톡 답변 입력"}
-              className="flex-1 min-w-0 max-h-32 resize-none rounded border border-[#D6D8DF] bg-[#F5F6F8] px-3 py-2 text-sm leading-5 text-[#1A1F36] placeholder:text-[#9CA3AF] focus:bg-white focus:outline-none focus:border-[#2959AA]"
-              disabled={replySending}
-            />
-            {sendEnabled ? (
-              <button
-                onClick={() => void handleReplySend()}
-                disabled={replySending || !replyInput.trim()}
-                className={`h-10 shrink-0 px-4 rounded text-xs font-medium text-white transition-colors disabled:bg-[#9CA3AF] ${
-                  replySent
-                    ? "bg-green-600"
-                    : "bg-[#2959AA] hover:bg-[#1F4485]"
-                }`}
-              >
-                {replySending ? "전송 중" : replySent ? "전송됨" : "전송"}
-              </button>
-            ) : (
-              <button
-                data-admin-only
-                onClick={onOpenSettings}
-                className="h-10 shrink-0 px-3 rounded text-xs font-medium bg-[#E8E9EC] text-[#1A1F36] hover:bg-[#D6D8DF]"
-                title="설정에서 카톡 자동발송 활성화"
-              >
-                발송 설정
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* 임의 생성 채팅(manual_*) 전용 하단 입력창 — Claude로 파싱하여 메시지로 변환 */}
       {!readOnly && isManual && (
         <div className="border-t border-[#D6D8DF] bg-white px-3 py-2 shrink-0">

@@ -3,36 +3,40 @@ import { canReadChat } from "@/lib/team-store";
 import type { TeamUser } from "@/lib/team-types";
 export const GET = withTeamApi(handleGET, "member");
 // 채팅 목록 + 카테고리 병합 (kakaocli + manual)
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { getRefreshJob, startRefreshJob, waitForRefresh } from "@/lib/refresh-job";
+import type { Chat } from "@/lib/types";
 import type { NextRequest } from "next/server";
 import { getChatSnapshot, listChats } from "@/lib/kakaocli";
 import { getCategories, getManualChats } from "@/lib/store";
-import { getBoardState } from "@/lib/board-store";
+import { getBoardStates } from "@/lib/board-store";
 
 export const dynamic = "force-dynamic";
 
-// UI 기본값. 늘리면 목록 렌더 비용이 커지므로 그대로 둔다.
-const DEFAULT_LIMIT = 200;
-// 특정 chatId를 찾을 때만 쓰는 깊은 조회 상한.
-// kakaocli는 1000건도 0.1초대라 조회 비용이 사실상 없다.
-const LOOKUP_LIMIT = 1000;
+// 기본 목록과 특정 방 조회는 전체를 대상으로 한다. 명시한 limit만 제한한다.
+const EXPLICIT_LIMIT_MAX = 10_000;
 
 async function handleGET(req: NextRequest, user: TeamUser) {
-  // ?chatId= 가 오면 목록이 아니라 "그 방 하나 찾기"가 목적이므로 깊게 조회한다.
-  // (오래된 방은 상위 200 밖으로 밀려나 매핑이 있어도 안 잡히는 문제)
+  const startedAt = performance.now();
   const wantedId = req.nextUrl.searchParams.get("chatId");
-  // ?limit= 로 명시 요청 시 깊게 조회 (오래된 방 검색·매핑용). 상한은 LOOKUP_LIMIT.
   const rawLimit = parseInt(req.nextUrl.searchParams.get("limit") || "", 10);
   const askedLimit = Number.isFinite(rawLimit) && rawLimit > 0
-    ? Math.min(rawLimit, LOOKUP_LIMIT)
+    ? Math.min(rawLimit, EXPLICIT_LIMIT_MAX)
     : null;
-  const limit = wantedId ? LOOKUP_LIMIT : (askedLimit ?? DEFAULT_LIMIT);
-  const snapshot = !wantedId && req.nextUrl.searchParams.get("fresh") !== "1"
-    ? getChatSnapshot(limit)
-    : null;
+  const limit = wantedId ? 0 : (askedLimit ?? 0);
+  const force = req.nextUrl.searchParams.get("fresh") === "1";
+  const snapshot = getChatSnapshot(limit);
 
+  const polling = req.nextUrl.searchParams.get("poll") === "1";
+  const key = `chats:${limit}`;
+  const job = polling ? getRefreshJob<Chat[]>(key)
+    : startRefreshJob(key, () => listChats(limit, true), force ? 0 : 15_000);
+  if (job?.pending) {
+    after(() => job.promise);
+    if (!polling && !snapshot) await waitForRefresh(job);
+  }
   const [chats, categories, manualChats] = await Promise.all([
-    snapshot ?? listChats(limit),
+    getChatSnapshot(limit) ?? (job && !job.pending && !job.failed ? job.value : null) ?? [],
     getCategories(),
     Promise.resolve(getManualChats()),
   ]);
@@ -51,12 +55,17 @@ async function handleGET(req: NextRequest, user: TeamUser) {
     category: (categories[m.id] ?? null) as import("@/lib/types").Category | null,
   }));
 
+  const boards = getBoardStates();
   const all = [...merged, ...manualMerged].filter((chat) => canReadChat(user, String(chat.id)))
-    .map((chat) => ({ ...chat, board: getBoardState(String(chat.id)) }));
+    .map((chat) => ({ ...chat, board: boards.get(String(chat.id)) ?? { stage: "new", revision: 0, position: 0 } }));
+  const timing = `chats;dur=${(performance.now() - startedAt).toFixed(1)}`;
   if (wantedId) {
-    return NextResponse.json(all.filter((c) => String(c.id) === wantedId));
+    return NextResponse.json(all.filter((c) => String(c.id) === wantedId), {
+      headers: { "X-Refresh-Pending": job?.pending ? "1" : "0", "Server-Timing": timing },
+    });
   }
   return NextResponse.json(all, {
-    headers: { "X-Chat-Snapshot": snapshot ? "1" : "0" },
+    headers: { "X-Chat-Snapshot": snapshot && !polling ? "1" : "0", "Server-Timing": timing,
+      "X-Refresh-Pending": job?.pending ? "1" : "0", "X-Refresh-Failed": job?.failed ? "1" : "0" },
   });
 }

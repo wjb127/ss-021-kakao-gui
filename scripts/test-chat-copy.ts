@@ -23,6 +23,7 @@ const route = load("app/api/messages/export/route.ts", {
     "next/server": { NextResponse: { json: Response.json } },
     "@/lib/store": { getCachedMessages: (_id: string, since?: string) => { cutoff = since; return saved; } },
     "@/lib/kakao-events": { normalizeKakaoEvents: (data: unknown) => data },
+    "@/lib/long-message": { expandLongMessages: async (_id: string, data: unknown) => data },
   } as Record<string, unknown>)[name],
 });
 const req = (query: string) => ({ nextUrl: new URL(`http://localhost/?${query}`) });

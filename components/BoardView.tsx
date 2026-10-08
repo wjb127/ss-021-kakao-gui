@@ -32,6 +32,7 @@ const CATEGORY_LABELS: Record<Category, string> = {
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
+    if (!iso || Number.isNaN(d.getTime())) return "";
     const now = new Date();
     const sameDay =
       d.getFullYear() === now.getFullYear() &&
@@ -194,7 +195,7 @@ export function BoardView({
   const filtered = [...chats]
     .filter((c) => c.category === "client")
     .sort((a, b) => (stateFor(a).position ?? 0) - (stateFor(b).position ?? 0)
-      || b.last_message_at.localeCompare(a.last_message_at) || a.id.localeCompare(b.id));
+      || (b.last_message_at ?? "").localeCompare(a.last_message_at ?? "") || a.id.localeCompare(b.id));
 
   function drop(stage: BoardStage, target?: { id: string; after: boolean }) {
     const chat = filtered.find((item) => item.id === dragging);

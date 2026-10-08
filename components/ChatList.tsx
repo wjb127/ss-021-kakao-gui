@@ -2,7 +2,7 @@
 import { useIsAdmin } from "./TeamShell";
 
 // 채팅 목록 사이드바
-import { useMemo, useEffect, useRef, useState } from "react";
+import { memo, useMemo, useEffect, useRef, useState } from "react";
 import type { Category, Chat } from "@/lib/types";
 import { ViewSwitcher } from "./ViewSwitcher";
 
@@ -118,6 +118,7 @@ function CategoryDropdown({
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
+    if (!iso || Number.isNaN(d.getTime())) return "";
     const now = new Date();
     const sameDay =
       d.getFullYear() === now.getFullYear() &&
@@ -144,7 +145,7 @@ const CATEGORY_DOT: Record<Category, string> = {
 };
 
 // 채팅 행 — 모바일 좌측 스와이프 시 빨간 삭제 버튼 노출 (manual_* 전용)
-function ChatRow({
+const ChatRow = memo(function ChatRow({
   chat,
   isSelected,
   onSelect,
@@ -212,7 +213,8 @@ function ChatRow({
     : "hover:bg-[#E0E2E8]";
 
   return (
-    <div className={`relative border-b border-[#C8CAD1] ${catOpen ? "z-30" : ""}`}>
+    <div className={`relative border-b border-[#C8CAD1] ${catOpen ? "z-30" : ""}`}
+      style={catOpen || isSelected ? undefined : { contentVisibility: "auto", containIntrinsicSize: "auto 60px" }}>
       {/* 좌측 스와이프 시 노출되는 삭제 버튼 (manual_* 전용) */}
       {isManual && (
         <button
@@ -289,7 +291,7 @@ function ChatRow({
       </div>
     </div>
   );
-}
+});
 
 export function ChatList({
   chats,
@@ -328,7 +330,7 @@ export function ChatList({
       : byCategory;
 
     return [...list].sort((a, b) =>
-      b.last_message_at.localeCompare(a.last_message_at),
+      (b.last_message_at ?? "").localeCompare(a.last_message_at ?? ""),
     );
   }, [chats, filter, query]);
 

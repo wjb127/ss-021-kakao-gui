@@ -45,6 +45,12 @@ export function getBoardState(chatId: string): BoardState {
     ?? { stage: "new", revision: 0, position: 0 };
 }
 
+// 목록에서는 방별 쿼리 대신 한 번 읽는다. 응답 권한 필터는 API에서 유지한다.
+export function getBoardStates(): Map<string, BoardState> {
+  const rows = db().prepare("SELECT chat_id, stage, revision, position FROM chat_board").all() as (BoardState & { chat_id: string })[];
+  return new Map(rows.map(({ chat_id, ...state }) => [chat_id, state]));
+}
+
 export function moveBoardChat(chatId: string, stage: BoardStage, revision: number, order?: BoardOrderEntry[]) {
   const connection = db();
   return connection.transaction(() => {

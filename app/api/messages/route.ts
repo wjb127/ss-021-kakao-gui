@@ -6,6 +6,8 @@ import type { NextRequest } from "next/server";
 import { enrichCachedMessages, listMessages } from "@/lib/kakaocli";
 import { backfillMessages, isBackfillPending } from "@/lib/message-backfill";
 import { normalizeKakaoEvents } from "@/lib/kakao-events";
+import { getRefreshJob, startRefreshJob, waitForRefresh } from "@/lib/refresh-job";
+import type { Message } from "@/lib/types";
 import {
   getCachedMessageCount,
   getCachedMessageContext,
@@ -85,6 +87,35 @@ async function handleGET(req: NextRequest) {
     10,
   );
   const shouldCache = memberCount > 0 && memberCount <= 10;
+
+  if (paginated && !before) {
+    const key = `messages:${chatId}:${shouldCache}`;
+    const hasCache = shouldCache && getCachedMessageCount(chatId) > 0;
+    const existing = getRefreshJob<Message[]>(key);
+    const ownsJob = shouldSync && !existing?.pending;
+    const job = shouldSync ? startRefreshJob(key, async () => {
+      const fresh = await listMessages(chatId, "3d", 1000, true);
+      if (shouldCache) upsertMessages(fresh);
+      return fresh;
+    }) : getRefreshJob<Message[]>(key);
+    if (job?.pending) {
+      after(async () => {
+        await job.promise;
+        if (!job.failed && shouldCache && ownsJob) {
+          if (!hasCache) await backfillMessages(chatId);
+          upsertMessages(await enrichCachedMessages(chatId, getCachedMessagePage(chatId, { limit }).messages));
+        }
+      });
+      if (shouldSync) await waitForRefresh(job);
+    }
+    const fresh = job?.value ?? [];
+    const page = shouldCache ? getCachedMessagePage(chatId, { limit })
+      : { messages: fresh.slice(-limit), total: fresh.length, hasMore: false, nextCursor: null };
+    return NextResponse.json({ ...page, messages: normalizeKakaoEvents(page.messages),
+      deletedMessageIds: fresh.map((message) => message.deleted_message_id).filter((id): id is string => !!id),
+      syncPending: job?.pending ?? false, syncFailed: job?.failed ?? false,
+      historyPending: shouldCache && (isBackfillPending(chatId) || (ownsJob && !hasCache && !job?.failed)) } satisfies MessagePage);
+  }
 
   if (shouldCache) {
     let historyPending = isBackfillPending(chatId);

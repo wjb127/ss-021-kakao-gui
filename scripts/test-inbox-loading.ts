@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
+import * as refreshJobs from "../lib/refresh-job";
 
 // 원본 카카오 DB를 건드리지 않고 실제 라우트의 빠른 경로를 검증한다.
 function loadRoute(file: string, dependencies: Record<string, unknown>) {
@@ -14,10 +15,12 @@ function loadRoute(file: string, dependencies: Record<string, unknown>) {
     require: (name: string) => {
       if (name === "@/lib/team-auth") return { withTeamApi: (handler: (req: unknown, user: unknown) => unknown) => (req: unknown) => handler(req, { role: "admin", active: true }) };
       if (name === "@/lib/team-store") return { canReadChat: () => true };
+      if (name === "@/lib/refresh-job") return refreshJobs;
       assert.ok(name in dependencies, `예상하지 않은 의존성: ${name}`);
       return dependencies[name];
     },
     console,
+    performance,
   });
   return exports.GET;
 }
@@ -28,20 +31,42 @@ const next = {
   after: (fn: () => Promise<void>) => deferred.push(fn),
 };
 let sourceCalls = 0;
+let sourceError = false;
+let slowSource: Promise<void> | null = null;
 const room = { id: "123", display_name: "대화", member_count: 2 };
 const chats = loadRoute("app/api/chats/route.ts", {
   "next/server": next,
-  "@/lib/board-store": { getBoardState: () => ({ stage: "new", revision: 0 }) },
+  "@/lib/board-store": { getBoardStates: () => new Map() },
   "@/lib/kakaocli": {
     getChatSnapshot: () => [room],
-    listChats: async () => { sourceCalls++; return [room]; },
+    listChats: async () => { sourceCalls++; if (slowSource) await slowSource; if (sourceError) throw new Error("원본 조회 실패"); return [room]; },
   },
   "@/lib/store": { getCategories: async () => ({}), getManualChats: () => [] },
 });
 assert.equal((await chats(request(""))).headers.get("X-Chat-Snapshot"), "1");
-assert.equal(sourceCalls, 0, "저장된 목록은 원본 조회 없이 반환해야 한다");
+assert.equal(sourceCalls, 1, "저장된 목록 반환과 함께 백그라운드 갱신을 시작한다");
+await refreshJobs.getRefreshJob("chats:0")?.promise;
+await chats(request(""));
+assert.equal(sourceCalls, 1, "짧은 시간의 자동 갱신은 완료된 조회를 재사용한다");
 await chats(request("fresh=1"));
-assert.equal(sourceCalls, 1, "백그라운드 갱신은 원본을 조회해야 한다");
+assert.equal(sourceCalls, 2, "수동 갱신은 원본을 다시 조회해야 한다");
+await refreshJobs.getRefreshJob("chats:0")?.promise;
+let releaseSource!: () => void;
+slowSource = new Promise<void>((resolve) => { releaseSource = resolve; });
+const began = performance.now();
+const slowResponse = await chats(request("fresh=1"));
+assert.ok(performance.now() - began < 100, "캐시가 있으면 원본 지연을 기다리지 않는다");
+assert.equal(slowResponse.headers.get("X-Refresh-Pending"), "1");
+assert.equal((await slowResponse.json())[0].id, room.id);
+releaseSource();
+await refreshJobs.getRefreshJob("chats:0")?.promise;
+slowSource = null;
+sourceError = true;
+await chats(request("fresh=1"));
+await refreshJobs.getRefreshJob("chats:0")?.promise;
+const failedPoll = await chats(request("poll=1"));
+assert.equal(failedPoll.headers.get("X-Refresh-Failed"), "1");
+assert.equal((await failedPoll.json())[0].id, room.id, "원본 실패에도 저장된 방을 유지한다");
 
 let count = 10;
 let sourceWindow = "";

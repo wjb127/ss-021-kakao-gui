@@ -27,7 +27,7 @@ export function CardView({
   // 고객 카테고리만 표시
   const filtered = [...chats]
     .filter((c) => c.category === "client")
-    .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at));
+    .sort((a, b) => (b.last_message_at ?? "").localeCompare(a.last_message_at ?? ""));
 
   return (
     <div className="flex flex-col h-screen bg-[#F5F6F8] overflow-hidden">

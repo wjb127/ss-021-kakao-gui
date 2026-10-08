@@ -17,6 +17,12 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { NewChatModal } from "@/components/NewChatModal";
 import { RestoreModal } from "@/components/RestoreModal";
 import { useIsAdmin } from "@/components/TeamShell";
+import { fetchRefreshJson } from "@/lib/refresh-fetch";
+import { reconcileChats } from "@/lib/chat-list-state";
+
+function RefreshNotice({ text }: { text: string }) {
+  return text ? <div role="status" className="pointer-events-none fixed bottom-3 left-3 right-3 z-50 mx-auto w-fit max-w-[calc(100%-24px)] rounded-md border border-[#D6D8DF] bg-white px-3 py-2 text-xs text-[#2959AA] shadow-sm">{text}</div> : null;
+}
 
 type View = "inbox" | "board" | "card";
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
@@ -66,6 +72,10 @@ export default function Home() {
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [messageTotal, setMessageTotal] = useState(0);
   const [historyPending, setHistoryPending] = useState(false);
+  const [syncPending, setSyncPending] = useState(false);
+  const [chatsPending, setChatsPending] = useState(false);
+  const [chatsNotice, setChatsNotice] = useState("");
+  const [messagesNotice, setMessagesNotice] = useState("");
   const [filter, setFilter] = useState<"all" | "client" | "casual">("client");
   const [chatsLoading, setChatsLoading] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -76,6 +86,11 @@ export default function Home() {
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [restoreChatId, setRestoreChatId] = useState<string | null>(null);
   const [mobileAIOpen, setMobileAIOpen] = useState(false);
+  const [panelTabRequest, setPanelTabRequest] = useState<{ tab: "업무" | "답변"; sequence: number }>({ tab: "업무", sequence: 0 });
+  const openPanel = (tab: "업무" | "답변") => {
+    setPanelTabRequest((previous) => ({ tab, sequence: previous.sequence + 1 }));
+    setMobileAIOpen(true);
+  };
   const [messageTarget, setMessageTarget] = useState<{ chatId: string; id: string; nonce: number } | null>(null);
   const chatsRequestRef = useRef<Promise<void> | null>(null);
   const messagesRequestRef = useRef<Map<string, Promise<void>>>(new Map());
@@ -110,24 +125,22 @@ export default function Home() {
   const chatsRef = useRef<Chat[]>([]);
   useEffect(() => { chatsRef.current = chats; }, [chats]);
 
-  const loadChats = useCallback((showLoading = true) => {
+  const loadChats = useCallback((showLoading = true, poll = false, force = false) => {
     if (chatsRequestRef.current) return chatsRequestRef.current;
 
     if (showLoading) setChatsLoading(true);
-    const request = fetch("/api/chats")
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`채팅 목록 요청 실패: ${r.status}`);
-        const data = await r.json();
-        setChats(Array.isArray(data) ? data : []);
+    if (showLoading) setChatsNotice("채팅 목록 새로고침 중…");
+    const signal = AbortSignal.timeout(4500);
+    const request = fetchRefreshJson<Chat[]>(poll ? "/api/chats?poll=1" : force ? "/api/chats?fresh=1" : "/api/chats", signal)
+      .then(({ data, headers }) => {
+        if (!Array.isArray(data)) throw new Error("잘못된 목록 응답");
+        setChats((previous) => reconcileChats(previous, data));
         setChatsLoading(false);
-        if (r.headers.get("X-Chat-Snapshot") === "1") {
-          const fresh = await fetch("/api/chats?fresh=1");
-          if (!fresh.ok) throw new Error(`채팅 목록 갱신 실패: ${fresh.status}`);
-          const updated = await fresh.json();
-          if (Array.isArray(updated)) setChats(updated);
-        }
+        const pending = headers.get("X-Refresh-Pending") === "1";
+        setChatsPending(pending);
+        setChatsNotice(pending ? "저장된 목록 표시 중 · 최신 목록을 가져오고 있어요." : headers.get("X-Refresh-Failed") === "1" ? "목록 갱신 실패 · 기존 목록을 유지했어요. 다시 시도해 주세요." : "");
       })
-      .catch(console.error)
+      .catch(() => { setChatsPending(false); setChatsNotice("목록 연결이 지연돼요. 기존 목록을 유지했어요. 다시 시도해 주세요."); })
       .finally(() => {
         chatsRequestRef.current = null;
         if (showLoading) setChatsLoading(false);
@@ -139,15 +152,28 @@ export default function Home() {
 
   useEffect(() => { void loadChats(); }, [loadChats]);
 
+  useEffect(() => {
+    if (!chatsPending) return;
+    const timer = setInterval(() => { if (document.visibilityState === "visible") void loadChats(false, true); }, 2000);
+    return () => clearInterval(timer);
+  }, [chatsPending, loadChats]);
+
   // 목록 상한 밖의 오래된 대화도 할 일에서 바로 열 수 있게 조회한다.
   useEffect(() => {
     if (!selectedChatId || chatsLoading || chats.some((chat) => chat.id === selectedChatId)) return;
     const controller = new AbortController();
-    fetch(`/api/chats?chatId=${encodeURIComponent(selectedChatId)}`, { signal: controller.signal })
-      .then(async (response) => { if (!response.ok) return; const found: Chat[] = await response.json();
-        if (found.length) setChats((previous) => [...previous.filter((chat) => chat.id !== selectedChatId), ...found]); })
-      .catch(() => { /* 대화 목록의 다음 갱신에서 다시 확인한다. */ });
-    return () => controller.abort();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const lookup = async (poll = false) => {
+      try {
+        const { data: found, headers } = await fetchRefreshJson<Chat[]>(`/api/chats?chatId=${encodeURIComponent(selectedChatId)}${poll ? "&poll=1" : ""}`,
+          AbortSignal.any([controller.signal, AbortSignal.timeout(4500)]));
+        if (controller.signal.aborted) return;
+        if (found.length) setChats((previous) => [...previous.filter((chat) => chat.id !== selectedChatId), ...found]);
+        else if (headers.get("X-Refresh-Pending") === "1") timer = setTimeout(() => void lookup(true), 2000);
+      } catch { /* 조회 실패는 다음 목록 갱신에서 다시 시도한다. */ }
+    };
+    void lookup();
+    return () => { controller.abort(); clearTimeout(timer); };
   }, [selectedChatId, chatsLoading, chats]);
 
   const loadMessages = useCallback((
@@ -182,12 +208,8 @@ export default function Home() {
       params.set("beforeTimestamp", before.timestamp);
       params.set("beforeId", before.id);
     }
-    const request = fetch(`/api/messages?${params.toString()}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`메시지 요청 실패: ${r.status}`);
-        return r.json();
-      })
-      .then((data: MessagePage) => {
+    const request = fetchRefreshJson<MessagePage>(`/api/messages?${params.toString()}`)
+      .then(({ data }) => {
         const incoming = Array.isArray(data.messages) ? data.messages : [];
         const deletedIds = new Set(data.deletedMessageIds ?? []);
         const cached = messageCacheRef.current.get(chatId);
@@ -228,6 +250,10 @@ export default function Home() {
         };
 
         if (selectedChatIdRef.current === chatId) {
+          if (!prepend) {
+            setSyncPending(!!data.syncPending);
+            setMessagesNotice(data.syncPending ? "저장된 대화 표시 중 · 최신 대화를 가져오고 있어요." : data.syncFailed ? "대화 갱신 실패 · 기존 대화를 유지했어요. 다시 시도해 주세요." : "");
+          }
           setHistoryPending(!!data.historyPending);
           setMessages((previous) => {
             const next = updateMessages(previous);
@@ -252,11 +278,9 @@ export default function Home() {
       })
       .catch((error) => {
         console.error(error);
-        if (!prepend && showLoading && selectedChatIdRef.current === chatId) {
-          setMessages([]);
-          setMessageTotal(0);
-          setHasOlderMessages(false);
-          setMessageCursor(null);
+        if (selectedChatIdRef.current === chatId) {
+          setSyncPending(false);
+          setMessagesNotice("대화 연결이 지연돼요. 기존 대화를 유지했어요. 다시 시도해 주세요.");
         }
       })
       .finally(() => {
@@ -285,14 +309,14 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!historyPending || !selectedChatId) return;
+    if ((!historyPending && !syncPending) || !selectedChatId) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") {
         void loadMessages(selectedChatId, { showLoading: false, sync: false });
       }
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [historyPending, selectedChatId, loadMessages]);
+  }, [historyPending, syncPending, selectedChatId, loadMessages]);
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
@@ -340,12 +364,14 @@ export default function Home() {
   }, [loadChats, loadMessages]);
 
   const handleRefreshChats = useCallback(() => {
-    void loadChats();
+    void loadChats(true, false, true);
   }, [loadChats]);
 
   const handleSelect = useCallback((id: string) => {
     if (selectedChatIdRef.current === id) return;
     setHistoryPending(false);
+    setSyncPending(false);
+    setMessagesNotice("");
     selectedChatIdRef.current = id;
     if (!restoreCachedChat(id)) {
       setMessages([]);
@@ -359,6 +385,9 @@ export default function Home() {
   }, [restoreCachedChat]);
 
   const handleBack = useCallback(() => {
+    setSyncPending(false);
+    setHistoryPending(false);
+    setMessagesNotice("");
     selectedChatIdRef.current = null;
     setSelectedChatId(null);
     setMessages([]);
@@ -370,7 +399,10 @@ export default function Home() {
   }, []);
 
   const handleRefreshMessages = useCallback(() => {
-    if (selectedChatId) void loadMessages(selectedChatId, { showLoading: false });
+    if (selectedChatId) {
+      setMessagesNotice("대화 새로고침 중…");
+      void loadMessages(selectedChatId, { showLoading: false });
+    }
   }, [selectedChatId, loadMessages]);
 
   const handleLoadOlderMessages = useCallback(async () => {
@@ -423,14 +455,14 @@ export default function Home() {
     setView("inbox");
   }
 
-  async function handleDeleteChat(chatId: string) {
+  const handleDeleteChat = useCallback(async (chatId: string) => {
     await fetch("/api/manual-chat", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chatId }),
     });
     setChats((prev) => prev.filter((c) => c.id !== chatId));
-    if (selectedChatId === chatId) {
+    if (selectedChatIdRef.current === chatId) {
       selectedChatIdRef.current = null;
       setSelectedChatId(null);
       setMessages([]);
@@ -440,7 +472,7 @@ export default function Home() {
       loadedOlderMessagesRef.current = false;
     }
     messageCacheRef.current.delete(chatId);
-  }
+  }, []);
 
   function switchToInbox(chatId?: string) {
     setView("inbox");
@@ -465,6 +497,7 @@ export default function Home() {
   if (view === "board") {
     return (
       <>
+        <div style={{ height: chatsNotice ? "calc(100% - 56px)" : "100%" }}>
         <BoardView
           chats={chats}
           filter={filter}
@@ -480,6 +513,8 @@ export default function Home() {
           refreshing={chatsLoading}
           onRefresh={handleRefreshChats}
         />
+        </div>
+        <RefreshNotice text={chatsNotice} />
         <SettingsModal
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
@@ -496,6 +531,7 @@ export default function Home() {
   if (view === "card") {
     return (
       <>
+        <div style={{ height: chatsNotice ? "calc(100% - 56px)" : "100%" }}>
         <CardView
           chats={chats}
           onSwitchToInbox={switchToInbox}
@@ -508,6 +544,8 @@ export default function Home() {
           refreshing={chatsLoading}
           onRefresh={handleRefreshChats}
         />
+        </div>
+        <RefreshNotice text={chatsNotice} />
         <SettingsModal
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
@@ -528,7 +566,8 @@ export default function Home() {
 
   return (
     <>
-      <div className="flex h-screen bg-[#D6D8DF] text-[#1A1F36] overflow-hidden">
+      <div className="flex h-screen bg-[#D6D8DF] text-[#1A1F36] overflow-hidden" style={{ height: messagesNotice || chatsNotice ? "calc(100% - 56px)" : "100%" }}>
+        <RefreshNotice text={messagesNotice || chatsNotice} />
         {/* ChatList */}
         <div
           className={`${showListMobile ? "flex" : "hidden"} md:flex w-full ${
@@ -561,7 +600,8 @@ export default function Home() {
           <ChatView
             chat={selectedChat}
             messageTarget={messageTarget}
-            onOpenWork={() => setMobileAIOpen(true)}
+            onOpenWork={() => openPanel("업무")}
+            onOpenReply={() => openPanel("답변")}
             messages={messages}
             loading={messagesLoading}
             loadingOlder={olderMessagesLoading}
@@ -571,29 +611,6 @@ export default function Home() {
             onRefresh={handleRefreshMessages}
             onRestore={selectedChat ? () => setRestoreChatId(selectedChat.id) : undefined}
             onBack={handleBack}
-            onOpenSettings={() => setSettingsOpen(true)}
-            onMessageSent={(message) => {
-              setMessages((previous) => {
-                const next = mergeMessages(previous, [message]);
-                if (selectedChatId) {
-                  const cached = messageCacheRef.current.get(selectedChatId);
-                  if (cached) {
-                    setCachedChat(messageCacheRef.current, selectedChatId, {
-                      ...cached,
-                      messages: next,
-                      total: Math.max(cached.total, next.length),
-                    });
-                  }
-                }
-                return next;
-              });
-              setMessageTotal((total) => total + 1);
-              setChats((previous) => previous.map((item) =>
-                item.id === message.chat_id
-                  ? { ...item, last_message_at: message.timestamp }
-                  : item,
-              ));
-            }}
             onAttachmentDownloaded={(messageId, filePath) => {
               setMessages((prev) => {
                 const next = prev.map((m) =>
@@ -622,6 +639,24 @@ export default function Home() {
         >
           <AIPanel
             chat={selectedChat}
+            tabRequest={panelTabRequest}
+            settingsOpen={settingsOpen}
+            onOpenSettings={() => { setMobileAIOpen(false); setSettingsOpen(true); }}
+            onMessageSent={(message) => {
+              const cached = messageCacheRef.current.get(message.chat_id);
+              if (cached) {
+                const next = mergeMessages(cached.messages, [message]);
+                setCachedChat(messageCacheRef.current, message.chat_id, {
+                  ...cached, messages: next, total: Math.max(cached.total + 1, next.length),
+                });
+              }
+              if (selectedChatIdRef.current === message.chat_id) {
+                setMessages((previous) => mergeMessages(previous, [message]));
+                setMessageTotal((total) => total + 1);
+              }
+              setChats((previous) => previous.map((item) => item.id === message.chat_id
+                ? { ...item, last_message_at: message.timestamp } : item));
+            }}
             onCloseMobile={() => setMobileAIOpen(false)}
             onBoardChange={(board) => setChats((previous) => previous.map((item) => item.id === selectedChatId ? { ...item, board } : item))}
             onOpenMessage={(id) => {

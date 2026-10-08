@@ -3,7 +3,7 @@ import { useIsAdmin } from "./TeamShell";
 
 // AI 분석 패널 - 우측
 import { useEffect, useRef, useState } from "react";
-import type { Analysis, Chat, Urgency } from "@/lib/types";
+import type { Analysis, Chat, Message, Urgency } from "@/lib/types";
 import { AI_ANALYSIS_ENABLED } from "@/lib/feature-flags";
 import { ClaudeRunModal } from "./ClaudeRunModal";
 import { WorkPanel } from "./WorkPanel";
@@ -14,6 +14,10 @@ interface Props {
   onCloseMobile?: () => void;
   onBoardChange: (state: BoardState) => void;
   onOpenMessage: (id: string) => void;
+  tabRequest?: { tab: "업무" | "답변"; sequence: number };
+  settingsOpen?: boolean;
+  onOpenSettings: () => void;
+  onMessageSent: (message: Message) => void;
 }
 
 const URGENCY_STYLE: Record<Urgency, string> = {
@@ -45,8 +49,21 @@ const TONE_LABEL: Record<Tone, string> = {
   brief: "간결",
 };
 
-export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: Props) {
-  const [tab, setTab] = useState<Tab>("업무");
+export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage, tabRequest, settingsOpen, onOpenSettings, onMessageSent }: Props) {
+  const [selectedTab, setTab] = useState<Tab>("업무");
+  const tab = chat && chat.category !== "client" ? "답변" : selectedTab;
+  const activeChatId = useRef(chat?.id);
+  const sendingRef = useRef(false);
+  useEffect(() => { activeChatId.current = chat?.id; }, [chat?.id]);
+  useEffect(() => { if (tabRequest) setTab(tabRequest.tab); }, [tabRequest]);
+  useEffect(() => {
+    if (settingsOpen) return;
+    let cancelled = false;
+    fetch("/api/settings").then((res) => res.json())
+      .then((settings) => { if (!cancelled) setSendEnabled(settings.send_enabled === "1"); })
+      .catch(() => { if (!cancelled) setSendEnabled(false); });
+    return () => { cancelled = true; };
+  }, [settingsOpen]);
 
   // ── 분석 탭 ──────────────────────────────────────────────
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -100,15 +117,10 @@ export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: P
     setReplyInstruction("");
     setReplyError(null);
     setReplyCopied(false);
+    setReplyLoading(false);
     setSendStatus("");
     setSendError(null);
     setSendConfirmOpen(false);
-
-    // settings에서 send_enabled 가져오기
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((s) => setSendEnabled(s.send_enabled === "1"))
-      .catch(() => setSendEnabled(false));
 
     if (!chat || chat.category !== "client") return;
 
@@ -170,10 +182,10 @@ export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: P
 
   // ── 답변 초안 생성 ───────────────────────────────────────
   async function runDraftReply() {
-    if (!chat) return;
+    if (!chat || readOnly || replyLoading || sendingRef.current) return;
+    const chatId = chat.id;
     setReplyLoading(true);
     setReplyError(null);
-    setReplyDraft("");
     try {
       const res = await fetch("/api/draft-reply", {
         method: "POST",
@@ -185,24 +197,31 @@ export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: P
         }),
       });
       const data = await res.json();
+      if (activeChatId.current !== chatId) return;
       if (!res.ok) setReplyError(data?.error || "초안 생성 실패");
       else setReplyDraft(data.draft as string);
     } catch (e) {
-      setReplyError(String(e));
+      if (activeChatId.current === chatId) setReplyError(String(e));
     } finally {
-      setReplyLoading(false);
+      if (activeChatId.current === chatId) setReplyLoading(false);
     }
   }
 
   async function copyDraft() {
-    if (!replyDraft) return;
-    await navigator.clipboard.writeText(replyDraft);
-    setReplyCopied(true);
-    setTimeout(() => setReplyCopied(false), 1500);
+    if (!replyDraft.trim()) return;
+    try {
+      await navigator.clipboard.writeText(replyDraft);
+      setReplyCopied(true);
+      setTimeout(() => setReplyCopied(false), 1500);
+    } catch {
+      setSendError("복사하지 못했어요. 내용을 선택해서 복사해 주세요.");
+    }
   }
 
   async function confirmSend() {
-    if (!chat || !replyDraft.trim()) return;
+    if (!chat || readOnly || !sendEnabled || chat.id.startsWith("manual_") || !replyDraft.trim() || sendingRef.current) return;
+    const chatId = chat.id;
+    sendingRef.current = true;
     setSendConfirmOpen(false);
     setSendStatus("sending");
     setSendError(null);
@@ -210,23 +229,22 @@ export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: P
       const res = await fetch("/api/send-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chatId: chat.id,
-          text: replyDraft,
-          confirmed: true,
-        }),
+        body: JSON.stringify({ chatId, text: replyDraft.trim(), confirmed: true }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setSendStatus("fail");
-        setSendError(data?.error || "발송 실패");
-      } else {
+      const data = await res.json() as { error?: string; message?: Message };
+      if (!res.ok || !data.message) throw new Error(data.error || "발송 실패");
+      onMessageSent(data.message);
+      if (activeChatId.current === chatId) {
+        setReplyDraft("");
         setSendStatus("sent");
-        setTimeout(() => setSendStatus(""), 2500);
       }
     } catch (e) {
-      setSendStatus("fail");
-      setSendError(String(e));
+      if (activeChatId.current === chatId) {
+        setSendStatus("fail");
+        setSendError(e instanceof Error ? e.message : "발송 실패");
+      }
+    } finally {
+      sendingRef.current = false;
     }
   }
 
@@ -336,28 +354,6 @@ export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: P
     );
   }
 
-  if (chat.category !== "client") {
-    return (
-      <div className="w-full h-full bg-white border-l border-[#D6D8DF] p-4 relative">
-        {onCloseMobile && (
-          <button
-            onClick={onCloseMobile}
-            className="md:hidden absolute top-2 right-2 text-[#9CA3AF] hover:text-[#1A1F36] text-xl leading-none"
-            aria-label="닫기"
-          >
-            ×
-          </button>
-        )}
-        <div className="text-xs text-[#6B7280]">
-          AI 분석은 <span className="text-[#2959AA] font-medium">고객</span> 카테고리 채팅에만
-          제공됩니다
-        </div>
-        <div className="text-[10px] text-[#9CA3AF] mt-2">
-          왼쪽 채팅 옆 배지를 클릭해서 카테고리를 [고객]으로 변경하세요
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="w-full h-full bg-white border-l border-[#D6D8DF] flex flex-col">
@@ -379,7 +375,7 @@ export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: P
         </div>
         {/* 탭 */}
         <div className="flex gap-0">
-          {(["업무", "분석", "답변", "메모", "연동"] as Tab[]).map((t) => (
+          {((chat.category === "client" ? ["업무", "분석", "답변", "메모", "연동"] : ["답변"]) as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -395,7 +391,7 @@ export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: P
         </div>
       </div>
 
-      <WorkPanel key={chat.id} chat={chat} active={tab === "업무"} onBoardChange={onBoardChange} onOpenMessage={onOpenMessage} onMemo={() => setTab("메모")} />
+      {chat.category === "client" && <WorkPanel key={chat.id} chat={chat} active={tab === "업무"} onBoardChange={onBoardChange} onOpenMessage={onOpenMessage} onMemo={() => setTab("메모")} />}
       {/* 탭 컨텐츠 */}
       <div className={tab === "업무" ? "hidden" : "flex-1 min-h-0 overflow-y-auto"}>
 
@@ -491,6 +487,80 @@ export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: P
         {tab === "답변" && (
           <div className="p-3 space-y-3">
             {readOnly && <p className="text-xs text-slate-500">답변 작성과 발송은 관리자만 할 수 있어요.</p>}
+            {/* 초안 */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[10px] text-[#6B7280]">답변 내용</div>
+                  <button
+                    onClick={copyDraft}
+                    disabled={!replyDraft.trim()}
+                    className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+                      replyCopied
+                        ? "bg-green-500 text-white"
+                        : "bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36]"
+                    }`}
+                  >
+                    {replyCopied ? "✓ 복사됨" : "복사"}
+                  </button>
+                </div>
+                <textarea readOnly={readOnly}
+                  value={replyDraft}
+                  aria-label="답변 내용"
+                  placeholder="답변을 직접 입력하거나 아래에서 초안을 생성하세요"
+                  disabled={sendStatus === "sending" || replyLoading}
+                  onChange={(e) => { setReplyDraft(e.target.value); setSendStatus(""); setSendError(null); setReplyCopied(false); }}
+                  className="w-full text-sm text-[#1A1F36] bg-white border border-[#D6D8DF] rounded p-2 resize-none focus:outline-none focus:border-[#2959AA] leading-5"
+                  rows={8}
+                />
+                <div className="text-[9px] text-[#9CA3AF] mt-1 leading-tight">
+                  가격과 일정은 발송 전에 확인해 주세요.
+                </div>
+
+                {/* 카톡 자동 발송 */}
+                <div className="mt-2 pt-2 border-t border-[#E8E9EC]">
+                  <button
+                    data-admin-only
+                    onClick={() => setSendConfirmOpen(true)}
+                    disabled={readOnly || replyLoading || !sendEnabled || sendStatus === "sending" || !replyDraft.trim() || chat.id.startsWith("manual_")}
+                    className={`w-full py-1.5 text-xs rounded transition-colors ${
+                      sendStatus === "sent"
+                        ? "bg-green-500 text-white"
+                        : sendStatus === "fail"
+                          ? "bg-red-500 text-white"
+                          : "bg-orange-500 hover:bg-orange-600 text-white disabled:bg-[#9CA3AF]"
+                    }`}
+                    title={
+                      !sendEnabled
+                        ? "설정 모달에서 자동발송 활성화 필요"
+                        : chat.id.startsWith("manual_")
+                          ? "수동 채팅(크몽 등)은 카톡 발송 불가"
+                          : "선택한 채팅방으로 발송"
+                    }
+                  >
+                    {sendStatus === "sending"
+                      ? "발송 중..."
+                      : sendStatus === "sent"
+                        ? "✓ 발송 완료"
+                        : sendStatus === "fail"
+                          ? "✗ 실패"
+                          : "카카오톡으로 발송"}
+                  </button>
+                  {sendError && (
+                    <div className="text-[10px] text-red-600 bg-red-50 border border-red-200 rounded p-1.5 mt-1">
+                      {sendError}
+                    </div>
+                  )}
+                  {chat.id.startsWith("manual_") ? (
+                    <p className="text-[11px] text-[#6B7280] mt-2">답변을 복사해서 원래 대화에 붙여넣어 주세요.</p>
+                  ) : !sendEnabled && !readOnly && (
+                    <button onClick={onOpenSettings} className="mt-2 text-xs text-[#2959AA] underline">발송 설정 열기</button>
+                  )}
+                </div>
+              </div>
+
+            <details className="border-t border-[#E8E9EC] pt-3">
+              <summary className="cursor-pointer text-xs text-[#6B7280]">답변 초안 생성</summary>
+              <div className="space-y-3 pt-3">
             {/* 톤 토글 */}
             <div>
               <div className="text-[10px] text-[#6B7280] mb-1">톤</div>
@@ -527,7 +597,7 @@ export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: P
             <button
               data-admin-only
               onClick={runDraftReply}
-              disabled={replyLoading}
+              disabled={readOnly || replyLoading || sendStatus === "sending"}
               className="w-full py-2 bg-[#2959AA] hover:bg-[#1D3F7A] text-white text-sm rounded transition-colors disabled:bg-[#9CA3AF]"
             >
               {replyLoading ? "생성 중..." : replyDraft ? "다시 생성" : "답변 초안 생성"}
@@ -539,74 +609,8 @@ export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: P
               </div>
             )}
 
-            {/* 초안 */}
-            {replyDraft && (
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <div className="text-[10px] text-[#6B7280]">초안 (편집 가능)</div>
-                  <button
-                    onClick={copyDraft}
-                    className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
-                      replyCopied
-                        ? "bg-green-500 text-white"
-                        : "bg-[#E8E9EC] hover:bg-[#D6D8DF] text-[#1A1F36]"
-                    }`}
-                  >
-                    {replyCopied ? "✓ 복사됨" : "복사"}
-                  </button>
-                </div>
-                <textarea readOnly={readOnly}
-                  value={replyDraft}
-                  onChange={(e) => setReplyDraft(e.target.value)}
-                  className="w-full text-sm text-[#1A1F36] bg-white border border-[#D6D8DF] rounded p-2 resize-none focus:outline-none focus:border-[#2959AA] leading-5"
-                  rows={8}
-                />
-                <div className="text-[9px] text-[#9CA3AF] mt-1 leading-tight">
-                  카톡에 붙여넣기 전 반드시 확인. AI가 가격·일정 임의 약속할 수 있음
-                </div>
-
-                {/* 카톡 자동 발송 */}
-                <div className="mt-2 pt-2 border-t border-[#E8E9EC]">
-                  <button
-                    data-admin-only
-                    onClick={() => setSendConfirmOpen(true)}
-                    disabled={!sendEnabled || sendStatus === "sending" || !replyDraft.trim() || chat.id.startsWith("manual_")}
-                    className={`w-full py-1.5 text-xs rounded transition-colors ${
-                      sendStatus === "sent"
-                        ? "bg-green-500 text-white"
-                        : sendStatus === "fail"
-                          ? "bg-red-500 text-white"
-                          : "bg-orange-500 hover:bg-orange-600 text-white disabled:bg-[#9CA3AF]"
-                    }`}
-                    title={
-                      !sendEnabled
-                        ? "설정 모달에서 자동발송 활성화 필요"
-                        : chat.id.startsWith("manual_")
-                          ? "수동 채팅(크몽 등)은 카톡 발송 불가"
-                          : "카톡 입력란에 붙여넣고 엔터"
-                    }
-                  >
-                    {sendStatus === "sending"
-                      ? "발송 중..."
-                      : sendStatus === "sent"
-                        ? "✓ 발송 완료"
-                        : sendStatus === "fail"
-                          ? "✗ 실패"
-                          : "카톡으로 발송 (위험)"}
-                  </button>
-                  {sendError && (
-                    <div className="text-[10px] text-red-600 bg-red-50 border border-red-200 rounded p-1.5 mt-1">
-                      {sendError}
-                    </div>
-                  )}
-                  {!sendEnabled && (
-                    <div className="text-[9px] text-[#9CA3AF] mt-1 leading-tight">
-                      설정 → 카톡 자동발송 토글 ON 필요
-                    </div>
-                  )}
-                </div>
               </div>
-            )}
+            </details>
 
             {/* 발송 확인 모달 */}
             {sendConfirmOpen && (
@@ -616,8 +620,7 @@ export function AIPanel({ chat, onCloseMobile, onBoardChange, onOpenMessage }: P
                     카톡 발송 확인
                   </div>
                   <div className="text-xs text-[#6B7280] mb-3 leading-5">
-                    카톡 mac 앱에서 <span className="font-semibold text-[#1A1F36]">{chat.display_name || chat.id}</span> 채팅창을
-                    먼저 열고 입력란을 클릭한 상태인지 확인하세요. 잘못 발송되면 되돌릴 수 없습니다.
+                    <span className="font-semibold text-[#1A1F36]">{chat.display_name || chat.id}</span>에 아래 답변을 보낼까요? 발송할 대상과 내용을 확인해 주세요.
                   </div>
                   <div className="bg-[#F5F6F8] border border-[#D6D8DF] rounded p-2 mb-3 max-h-32 overflow-y-auto">
                     <div className="text-[10px] text-[#6B7280] mb-1">미리보기</div>

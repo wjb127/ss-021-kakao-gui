@@ -30,7 +30,11 @@ function getChatCache(): ChatCacheState {
     let saved: Chat[] = [];
     try {
       const value = JSON.parse(getSetting("chat_list_snapshot") || "[]");
-      if (Array.isArray(value)) saved = value;
+      if (Array.isArray(value)) saved = value.map((chat) => ({
+        ...chat,
+        // 대화가 없는 방은 원본과 이전 스냅샷 모두 날짜를 생략할 수 있다.
+        last_message_at: chat.last_message_at ?? "",
+      }));
     } catch { /* 이전 캐시가 손상됐으면 원본에서 다시 읽는다. */ }
     global[CHAT_CACHE_KEY] = {
       data: saved,
@@ -44,7 +48,7 @@ function getChatCache(): ChatCacheState {
 
 export function getChatSnapshot(limit: number): Chat[] | null {
   const data = getChatCache().data;
-  return data.length > 0 ? data.slice(0, limit) : null;
+  return data.length > 0 ? (limit === 0 ? data : data.slice(0, limit)) : null;
 }
 
 const KAKAOCLI_BIN = process.env.KAKAOCLI_BIN || "kakaocli";
@@ -83,7 +87,7 @@ async function runQuery(sql: string): Promise<unknown> {
   const { stdout } = await execFileAsync(
     KAKAOCLI_BIN,
     ["query", sql, "--db", DB, "--key", KEY],
-    { maxBuffer: 50 * 1024 * 1024 },
+    { maxBuffer: 50 * 1024 * 1024, timeout: 10_000 },
   );
   return parseSafeJson(stdout);
 }
@@ -174,14 +178,16 @@ async function fetchChatDisplayNames(chatIds: string[]): Promise<Map<string, str
   return names;
 }
 
-export async function listChats(limit = 200): Promise<Chat[]> {
+export async function listChats(limit = 200, force = false): Promise<Chat[]> {
   const cache = getChatCache();
-  if (cache.expiresAt > Date.now() && cache.requestedLimit >= limit) {
-    return cache.data.slice(0, limit);
+  // 0은 전체 목록이다. 고정 상한 때문에 오래된 고객방이 사라지지 않게 한다.
+  const requestedLimit = limit === 0 ? Number.MAX_SAFE_INTEGER : limit;
+  if (!force && cache.expiresAt > Date.now() && cache.requestedLimit >= requestedLimit) {
+    return limit === 0 ? cache.data : cache.data.slice(0, limit);
   }
   if (cache.pending) {
     const pending = await cache.pending;
-    if (cache.requestedLimit >= limit) return pending.slice(0, limit);
+    if (cache.requestedLimit >= requestedLimit) return limit === 0 ? pending : pending.slice(0, limit);
   }
   if (!DB || !KEY) {
     console.error("KAKAOCLI_DB / KAKAOCLI_KEY 환경변수가 설정되지 않음");
@@ -189,19 +195,25 @@ export async function listChats(limit = 200): Promise<Chat[]> {
   }
   const request = (async (): Promise<Chat[]> => {
     try {
+      // 서로 독립적인 메타 조회는 함께 실행해 원본 DB 개방 대기를 줄인다.
+      const [countRows, titleRows] = await Promise.all([
+        limit === 0 ? runQuery("SELECT COUNT(*) FROM NTChatRoom") as Promise<number[][]> : Promise.resolve([[limit]]),
+        runQuery("SELECT CAST(chatId AS TEXT), content FROM NTChatMeta WHERE type=3 AND content IS NOT NULL ORDER BY updatedAt, revision") as Promise<[string, string][]>,
+      ]);
+      const actualLimit = Math.max(1, Number(countRows[0][0]));
       const { stdout } = await execFileAsync(
         KAKAOCLI_BIN,
         [
           "chats",
           "--json",
           "--limit",
-          String(limit),
+          String(actualLimit),
           "--db",
           DB,
           "--key",
           KEY,
         ],
-        { maxBuffer: 50 * 1024 * 1024 },
+        { maxBuffer: 50 * 1024 * 1024, timeout: 10_000 },
       );
       const data = parseSafeJson(stdout) as Array<{
         id: string | number;
@@ -211,10 +223,12 @@ export async function listChats(limit = 200): Promise<Chat[]> {
         last_message_at: string;
         type?: string;
       }>;
+      // 카톡에서 직접 지정한 이름은 chatName이 아니라 type=3 메타에 저장된다.
+      const titles = new Map(titleRows.map(([id, title]) => [String(id), title.trim()]));
       const missingNameIds = data
         .map((c) => String(c.id))
         .filter((id, index) =>
-          isMissingDisplayName(data[index].display_name, id),
+          !titles.get(id) && isMissingDisplayName(data[index].display_name, id),
         );
       const fallbackNames = await fetchChatDisplayNames(missingNameIds);
 
@@ -222,12 +236,12 @@ export async function listChats(limit = 200): Promise<Chat[]> {
         const id = String(c.id);
         return {
           id,
-          display_name: isMissingDisplayName(c.display_name, id)
+          display_name: titles.get(id) || (isMissingDisplayName(c.display_name, id)
             ? fallbackNames.get(id) ?? c.display_name ?? "(unknown)"
-            : c.display_name,
+            : c.display_name),
           member_count: c.member_count,
           unread_count: c.unread_count,
-          last_message_at: c.last_message_at,
+          last_message_at: c.last_message_at ?? "",
           type: c.type,
           category: null,
         };
@@ -248,6 +262,7 @@ export async function listChats(limit = 200): Promise<Chat[]> {
       return freshChats;
     } catch (err) {
       console.error("kakaocli chats 실패:", formatKakaoCliError(err));
+      if (force) throw err;
       return cache.data;
     }
   })();
@@ -255,8 +270,9 @@ export async function listChats(limit = 200): Promise<Chat[]> {
   try {
     const chats = await request;
     // 워커의 작은 조회가 화면용 목록 캐시를 축소하지 않게 유지한다.
-    cache.data = [...chats, ...cache.data.filter((old) => !chats.some((c) => c.id === old.id))];
-    cache.requestedLimit = limit;
+    const fetchedIds = new Set(chats.map((chat) => chat.id));
+    cache.data = [...chats, ...cache.data.filter((old) => !fetchedIds.has(old.id))];
+    cache.requestedLimit = requestedLimit;
     setSetting("chat_list_snapshot", JSON.stringify(cache.data));
     cache.expiresAt = Date.now() + CHAT_CACHE_TTL_MS;
     return chats;
@@ -405,7 +421,7 @@ async function fetchMediaMeta(
     const { stdout } = await execFileAsync(
       KAKAOCLI_BIN,
       ["query", sql, "--db", DB, "--key", KEY],
-      { maxBuffer: 50 * 1024 * 1024 },
+      { maxBuffer: 50 * 1024 * 1024, timeout: 10_000 },
     );
     const rows = parseSafeJson(stdout) as Array<
       [string | number, string | null, string | null]
@@ -478,6 +494,7 @@ export async function listMessages(
   chatId: string,
   since = "10d",
   limit = 500,
+  strict = false,
 ): Promise<Message[]> {
   if (!DB || !KEY) {
     console.error("KAKAOCLI_DB / KAKAOCLI_KEY 환경변수가 설정되지 않음");
@@ -500,7 +517,7 @@ export async function listMessages(
         "--key",
         KEY,
       ],
-      { maxBuffer: 50 * 1024 * 1024 },
+      { maxBuffer: 50 * 1024 * 1024, timeout: 10_000 },
     );
     const data = parseSafeJson(stdout) as Array<{
       id: string | number;
@@ -583,6 +600,7 @@ export async function listMessages(
     return normalizeKakaoEvents([...merged.values()]);
   } catch (err) {
     console.error("kakaocli messages 실패:", formatKakaoCliError(err));
+    if (strict) throw err;
     return [];
   }
 }

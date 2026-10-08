@@ -5,7 +5,8 @@ import path from "node:path";
 async function main() {
   const directory = process.env.KAKAOGUI_DATA_DIR;
   if (!directory || !path.basename(directory).startsWith("ss021-team-ui-")) throw new Error("격리된 UI 검증 DB 경로가 필요합니다.");
-  const origin = "http://localhost:3043";
+  const origin = `http://localhost:${Number(process.env.TEST_PORT || 3043)}`;
+  const sourceChatCount = Number(process.env.TEST_SOURCE_CHAT_COUNT || 0);
   const { password } = JSON.parse(readFileSync(path.join(directory, "credentials.json"), "utf8"));
   const team = await import("../lib/team-store");
   const admin = team.listTeamUsers().find((u) => u.role === "admin")!;
@@ -36,7 +37,7 @@ async function main() {
       assert.equal(response.status, 200);
       assert.match(response.headers.get("cache-control") || "", /no-store/);
       const chats = await response.json();
-      assert.equal(chats.length, user.role === "admin" ? 3 : 1);
+      assert.equal(chats.length, user.role === "admin" ? 3 + sourceChatCount : 1);
       if (user.role === "viewer") assert.equal(chats[0].id, "manual_design");
       latencies.push(performance.now() - begin);
     }

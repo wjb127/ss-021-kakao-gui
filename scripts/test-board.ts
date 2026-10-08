@@ -8,7 +8,7 @@ import type { Chat } from "../lib/types";
 async function main() {
   process.env.KAKAOGUI_DATA_DIR = mkdtempSync(path.join(os.tmpdir(), "ss021-board-"));
   process.env.KAKAOCLI_DB = ""; process.env.KAKAOCLI_KEY = "";
-  const { observeBoardChats, getBoardState, moveBoardChat } = await import("../lib/board-store");
+  const { observeBoardChats, getBoardState, getBoardStates, moveBoardChat } = await import("../lib/board-store");
   const chat: Chat = { id: "123", display_name: "고객 상담", category: "client", member_count: 2, unread_count: 1, last_message_at: "2026-09-13T10:00:00Z" };
   const observe = (unread: number, time: string, id = "90071992547409931") => observeBoardChats([{ ...chat, unread_count: unread, last_message_at: time }], new Map([[chat.id, id]]));
   observe(1, chat.last_message_at);
@@ -16,6 +16,7 @@ async function main() {
   assert.equal(moveBoardChat(chat.id, "progress", 0).ok, true);
   observe(1, chat.last_message_at);
   assert.equal(getBoardState(chat.id).stage, "progress");
+  assert.deepEqual(getBoardStates().get(chat.id), getBoardState(chat.id));
   // 발신으로 최근 시각만 바뀐 경우 단계를 유지한다.
   observe(1, "2026-09-13T10:01:00Z");
   assert.equal(getBoardState(chat.id).stage, "progress");
