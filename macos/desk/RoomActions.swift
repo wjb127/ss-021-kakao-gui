@@ -35,18 +35,23 @@ struct RoomActions:View {
     @State private var days = 2
     @State private var memo = ""
     @State private var loaded = false
-    @State private var work = false
+    @AppStorage("desk.copyScope") private var scope = 0
     @State private var expanded = false
     @State private var copying = false
     @State private var notice = ""
     var body:some View {
         VStack(alignment:.leading) {
             HStack {
-                TextField("일수",value:$days,format:.number).frame(width:48)
-                Button("일 복사") { Task { await copy(all:false) } }.disabled(!(1...3650).contains(days) || copying)
-                Button("전체 복사") { Task { await copy(all:true) } }.disabled(copying)
+                Picker("복사 범위",selection:$scope) {
+                    Text("전체 대화").tag(0)
+                    Text("최근 2일").tag(2)
+                    Text("최근 7일").tag(7)
+                    Text("직접 지정").tag(-1)
+                }.labelsHidden().accessibilityLabel("복사 범위").fixedSize()
+                if scope == -1 { TextField("일수",value:$days,format:.number).frame(width:42); Text("일") }
+                Button("복사") { Task { await copy(all:scope == 0, count:scope == -1 ? days : scope) } }
+                    .disabled(copying || (scope == -1 && !(1...3650).contains(days)))
                 Button(expanded ? "메모 접기":"메모 펼치기") { expanded.toggle() }
-                Button("업무") { work = true }
                 if copying { ProgressView().controlSize(.small) }
                 Text(notice).font(.caption)
             }
@@ -59,7 +64,7 @@ struct RoomActions:View {
                     } }.disabled(!loaded)
                 }
             }
-        }.sheet(isPresented:$work) { RoomWork(inbox:inbox,room:room) }.padding(8).task(id:expanded) {
+        }.padding(8).task(id:expanded) {
             guard expanded && !loaded else { return }
             do {
                 let data = try await inbox.request("/api/memo?chatId=" + room.id)
@@ -68,12 +73,12 @@ struct RoomActions:View {
             } catch { if !Task.isCancelled { inbox.issue = error.localizedDescription } }
         }
     }
-    func copy(all:Bool) async {
+    func copy(all:Bool,count:Int) async {
         struct Export:Decodable { let messages:[Entry]; let sourceLine:String; let since:String? }
         copying = true; defer { copying = false }
         do {
             let scope = all ? "all" : "recent"
-            let data = try await inbox.request("/api/messages/export?chatId=" + room.id + "&scope=" + scope + "&days=" + String(days))
+            let data = try await inbox.request("/api/messages/export?chatId=" + room.id + "&scope=" + scope + "&days=" + String(count))
             let result = try JSONDecoder().decode(Export.self,from:data)
             guard inbox.selected == room.id else { return }
             var merged = [String:Entry]()

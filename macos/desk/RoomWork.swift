@@ -3,7 +3,6 @@ import SwiftUI
 struct RoomWork:View {
     @ObservedObject var inbox:Inbox
     let room:Room
-    @Environment(\.dismiss) var dismiss
     struct Item:Codable,Identifiable { var id:String; var title:String; var done:Bool; var sourceId:String? }
     struct Work:Codable {
         var revision = 0, assigneeId = "", nextContact = "", deadline = "", waitingFor = ""
@@ -23,7 +22,7 @@ struct RoomWork:View {
     @State private var busy = false
     var body:some View {
         VStack(alignment:.leading) {
-            HStack { Text(room.display_name).font(.title2.bold()); Spacer(); Button("닫기") { dismiss() } }
+            HStack { Text("대화 업무").font(.title2.bold()); Spacer() }
             ScrollView {
                 Form {
                     Picker("담당자",selection:$work.assigneeId) {
@@ -65,7 +64,7 @@ struct RoomWork:View {
                 }
             }
             Text(note).font(.caption)
-        }.padding().frame(width:480,height:520).task {
+        }.padding().frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading).task {
             do {
                 let response = try JSONDecoder().decode(Response.self,from:await inbox.request("/api/work?chatId=" + room.id))
                 work = response.work; people = response.assignees ?? []; ready = true

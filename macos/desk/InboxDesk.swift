@@ -235,15 +235,23 @@ struct Desk: View {
                             }
                         }
                         Spacer(minLength:0)
-                    }.frame(minWidth:320,maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
+                    }.frame(minWidth:355,maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
+                    Group {
+                        if let room { RoomWork(inbox:inbox,room:room).id(room.id) }
+                        else { Text("대화를 선택하면 업무가 표시돼요").foregroundStyle(.secondary) }
+                    }.frame(minWidth:260, idealWidth:310, maxWidth:420,maxHeight:.infinity)
+                        .background(Color(nsColor:.controlBackgroundColor))
                 }
                 } else {
+                    GeometryReader { bounds in
+                    let columnWidth = max(160, (bounds.size.width - 72) / 6)
                     ScrollView([.horizontal,.vertical]) {
                         HStack(alignment: .top) {
                             ForEach(Stage.allCases, id: \.self) { stage in
                                 VStack(alignment: .leading) {
-                                    Text(stage.title).font(.headline)
-                                    ForEach(visibleRooms.filter { ($0.board?.stage ?? "new") == stage.rawValue }.sorted { ($0.board?.position ?? 0) < ($1.board?.position ?? 0) }) { room in
+                                    let column = (section == "보드" ? inbox.rooms : visibleRooms).filter { ($0.board?.stage ?? "new") == stage.rawValue }.sorted { ($0.board?.position ?? 0) < ($1.board?.position ?? 0) }
+                                    HStack { Text(stage.title).font(.headline); Spacer(); Text(String(column.count)).foregroundStyle(.secondary) }
+                                    ForEach(column) { room in
                                         VStack(alignment: .leading) {
                                             Button(room.display_name) { inbox.selected = room.id; section = "인박스" }
                                             if section == "카드" { Text("\(room.member_count)명 · 안 읽음 \(room.unread_count)").font(.caption) }
@@ -254,20 +262,23 @@ struct Desk: View {
                                                     }
                                                 }
                                             }
-                                        }.padding(8).frame(width:170,alignment:.leading).background(.regularMaterial)
+                                        }.padding(10).frame(maxWidth:.infinity,alignment:.leading).background(Color(nsColor:.controlBackgroundColor),in:RoundedRectangle(cornerRadius:8))
                                         .draggable(room.id)
                                         .dropDestination(for:String.self) { ids,_ in
                                             guard inbox.admin, let id = ids.first, id != room.id, let source = inbox.rooms.first(where:{$0.id == id}) else { return false }
                                             Task { await inbox.move(source,to:stage,before:room) }; return true
                                         }
                                     }
-                                }.frame(minWidth:175,minHeight:120,alignment:.topLeading)
+                                }.padding(8).frame(width:columnWidth,alignment:.topLeading)
+                                .frame(minHeight:max(160,bounds.size.height-32),alignment:.topLeading)
+                                .background(Color.purple.opacity(0.075),in:RoundedRectangle(cornerRadius:10))
                                 .dropDestination(for:String.self) { ids,_ in
                                     guard inbox.admin, let id = ids.first, let room = inbox.rooms.first(where:{ $0.id == id }) else { return false }
                                     Task { await inbox.move(room,to:stage) }; return true
                                 }
                             }
                         }.padding()
+                    }
                     }
                 }
                 }.toolbar {
@@ -313,5 +324,5 @@ struct Desk: View {
     }
 }
 @main struct DeskApp: App {
-    var body: some Scene { Window("인박스 데스크",id:"main") { Desk() }.defaultSize(width:940,height:640) }
+    var body: some Scene { Window("인박스 데스크",id:"main") { Desk() }.defaultSize(width:1280,height:800) }
 }
