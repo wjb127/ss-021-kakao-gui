@@ -225,6 +225,15 @@ func inputField(in window: AXUIElement) -> AXUIElement? {
 func send(chatName: String, message: String, selfChat: Bool) throws {
     guard AXIsProcessTrusted() else { throw SendError.accessibilityPermission }
 
+    let previousApp = NSWorkspace.shared.frontmostApplication
+    defer {
+        // 사용자가 다른 앱으로 전환했다면 그 선택을 유지한다.
+        if let previousApp, !previousApp.isTerminated,
+           previousApp.bundleIdentifier != bundleId,
+           NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleId {
+            _ = previousApp.activate()
+        }
+    }
     let (runningApp, app, initialMainWindow) = try openMainWindow()
     profile("메인 창 준비")
     closeExistingChatWindows(app)
