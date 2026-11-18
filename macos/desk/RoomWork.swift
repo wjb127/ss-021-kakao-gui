@@ -17,14 +17,22 @@ struct RoomWork:View {
     @State private var paths:[String] = []
     @State private var project = ""
     @State private var newItem = ""
-    @State private var reply = ""
-    @State private var confirming = false
     @State private var busy = false
     var body:some View {
         VStack(alignment:.leading) {
             HStack { Text("대화 업무").font(.title2.bold()); Spacer() }
             ScrollView {
+                VStack(alignment:.leading,spacing:12) {
+                    Text("처리 단계").font(.headline)
+                    Menu(Stage(rawValue:room.board?.stage ?? "new")?.title ?? "응대필요") {
+                        ForEach(Stage.allCases,id: \.self) { stage in Button(stage.title) { Task { await inbox.move(room,to:stage) } } }
+                    }.disabled(!inbox.admin).fixedSize().padding(5).background(DeskTheme.selected,in:RoundedRectangle(cornerRadius:6))
+                    Divider()
+                    Text("체크리스트").font(.headline)
+                }.frame(maxWidth:.infinity,alignment:.leading)
+
                 Form {
+                    DisclosureGroup("담당자 · 일정") {
                     Picker("담당자",selection:$work.assigneeId) {
                         Text("미지정").tag("")
                         ForEach(people) { Text($0.name).tag($0.id) }
@@ -32,6 +40,7 @@ struct RoomWork:View {
                     TextField("다음 연락 (YYYY-MM-DD)",text:$work.nextContact)
                     TextField("마감 (YYYY-MM-DD)",text:$work.deadline)
                     TextField("대기 사항",text:$work.waitingFor)
+                    }
                     ForEach($work.items) { $item in
                         HStack { Toggle(item.title,isOn:$item.done); Spacer(); Button("삭제") { work.items.removeAll { $0.id == item.id } } }
                         Picker("원문",selection:$item.sourceId) {
@@ -43,7 +52,7 @@ struct RoomWork:View {
                     Button("업무 저장") { Task { await save() } }
                 }.disabled(!inbox.admin || !ready || busy)
                 VStack(alignment:.leading) {
-                    Text("연결 프로젝트").bold()
+                    DisclosureGroup("연결 프로젝트") {
                     ForEach(paths,id: \.self) { path in
                         HStack {
                             Text(path).textSelection(.enabled)
@@ -58,10 +67,10 @@ struct RoomWork:View {
                     if inbox.admin {
                         HStack { TextField("프로젝트 경로",text:$project); Button("연결") { Task { await mapping(project,method:"POST") } }.disabled(project.isEmpty) }
                     }
+                    }
                 }
-                if inbox.admin && !room.id.hasPrefix("manual_") {
-                    HStack { TextField("답변 내용",text:$reply); Button("보내기") { confirming = true }.disabled(reply.isEmpty || busy) }
-                }
+                Divider()
+                DeskMemo(inbox:inbox,room:room).frame(maxWidth:.infinity,alignment:.leading)
             }
             Text(note).font(.caption)
         }.padding().frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading).task {
@@ -70,14 +79,7 @@ struct RoomWork:View {
                 work = response.work; people = response.assignees ?? []; ready = true
                 paths = try JSONDecoder().decode([String:[String]].self,from:await inbox.request("/api/project-mapping?chatId=" + room.id))["paths"] ?? []
             } catch { note = error.localizedDescription }
-        }.alert("이 대화방에 보낼까?",isPresented:$confirming) {
-            Button("취소",role:.cancel) {}
-            Button("보내기") { Task {
-                busy = true; defer { busy = false }
-                do { _ = try await inbox.request("/api/send-message",body:["chatId":room.id,"text":reply,"confirmed":true]); reply = ""; note = "전송됨"; await inbox.read(room.id) }
-                catch { note = error.localizedDescription }
-            } }
-        } message: { Text(room.display_name + "\n" + reply) }
+        }
     }
     func mapping(_ path:String, method:String) async {
         do {

@@ -33,10 +33,7 @@ struct RoomActions:View {
     @ObservedObject var inbox:Inbox
     let room:Room
     @State private var days = 2
-    @State private var memo = ""
-    @State private var loaded = false
     @AppStorage("desk.copyScope") private var scope = 0
-    @State private var expanded = false
     @State private var copying = false
     @State private var notice = ""
     var body:some View {
@@ -51,27 +48,10 @@ struct RoomActions:View {
                 if scope == -1 { TextField("일수",value:$days,format:.number).frame(width:42); Text("일") }
                 Button("복사") { Task { await copy(all:scope == 0, count:scope == -1 ? days : scope) } }
                     .disabled(copying || (scope == -1 && !(1...3650).contains(days)))
-                Button(expanded ? "메모 접기":"메모 펼치기") { expanded.toggle() }
                 if copying { ProgressView().controlSize(.small) }
                 Text(notice).font(.caption)
             }
-            if expanded {
-                TextEditor(text:$memo).frame(height:64).disabled(!loaded || !inbox.admin)
-                if inbox.admin {
-                    Button("메모 저장") { Task {
-                        do { _ = try await inbox.request("/api/memo",body:["chatId":room.id,"content":memo]); notice = "저장됨" }
-                        catch { inbox.issue = error.localizedDescription }
-                    } }.disabled(!loaded)
-                }
-            }
-        }.padding(8).task(id:expanded) {
-            guard expanded && !loaded else { return }
-            do {
-                let data = try await inbox.request("/api/memo?chatId=" + room.id)
-                struct Memo:Decodable { let content:String? }; memo = try JSONDecoder().decode(Memo.self,from:data).content ?? ""
-                loaded = true
-            } catch { if !Task.isCancelled { inbox.issue = error.localizedDescription } }
-        }
+        }.padding(8)
     }
     func copy(all:Bool,count:Int) async {
         struct Export:Decodable { let messages:[Entry]; let sourceLine:String; let since:String? }
@@ -96,5 +76,36 @@ struct RoomActions:View {
             NSPasteboard.general.setString(lines.joined(separator:"\n") + "\n\n" + result.sourceLine,forType:.string)
             notice = String(entries.count) + "건 복사됨"
         } catch { inbox.issue = error.localizedDescription }
+    }
+}
+
+struct DeskMemo:View {
+    @ObservedObject var inbox:Inbox
+    let room:Room
+    @State private var expanded = false
+    @State private var loaded = false
+    @State private var memo = ""
+    @State private var notice = ""
+    var body:some View {
+        VStack(alignment:.leading) {
+            Button(expanded ? "⌄  메모 접기":"›  메모 펼치기") { expanded.toggle() }.buttonStyle(.plain)
+            if !notice.isEmpty { Text(notice).font(.caption) }
+            if expanded {
+                TextEditor(text:$memo).frame(height:64).disabled(!loaded || !inbox.admin)
+                if inbox.admin {
+                    Button("메모 저장") { Task {
+                        do { _ = try await inbox.request("/api/memo",body:["chatId":room.id,"content":memo]); notice = "저장됨" }
+                        catch { inbox.issue = error.localizedDescription }
+                    } }.disabled(!loaded)
+                }
+            }
+        }.padding(8).task(id:expanded) {
+            guard expanded && !loaded else { return }
+            do {
+                let data = try await inbox.request("/api/memo?chatId=" + room.id)
+                struct Memo:Decodable { let content:String? }; memo = try JSONDecoder().decode(Memo.self,from:data).content ?? ""
+                loaded = true
+            } catch { if !Task.isCancelled { inbox.issue = error.localizedDescription } }
+        }
     }
 }

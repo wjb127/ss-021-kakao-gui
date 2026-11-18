@@ -98,7 +98,7 @@ struct Identity: Decodable {
             revision = identity.user.revision
             let fresh = try JSONDecoder().decode([Room].self, from: await request("/api/chats"))
             rooms = fresh
-            if !fresh.contains(where: { $0.id == selected }) { selected = nil; entries = [] }
+            if !fresh.contains(where: { $0.id == selected }) { selected = fresh.first(where: { $0.category == "client" })?.id ?? fresh.first?.id; entries = [] }
             issue = ""
         } catch { if !Task.isCancelled { issue = error.localizedDescription } }
     }
@@ -150,15 +150,31 @@ struct Desk: View {
     var body: some View {
         VStack(spacing:0) {
             if inbox.logged {
-                Picker("보기", selection: $section) {
-                    ForEach(["인박스","보드","카드"], id: \.self) { Text($0) }
-                }.pickerStyle(.segmented).frame(width:260).padding(6)
+                HStack(spacing:12) {
+                    Image(systemName:"circle.bottomhalf.filled").foregroundStyle(DeskTheme.forest)
+                        .frame(width:32,height:32).background(Color(red:0.875,green:0.925,blue:0.56),in:RoundedRectangle(cornerRadius:9))
+                    Text("카카오 인박스").font(.system(size:19,weight:.bold))
+                    Spacer()
+                    ForEach(["인박스","보드","카드"],id: \.self) { tab in
+                        Button(tab) { section = tab }.buttonStyle(.plain).padding(.horizontal,12).padding(.vertical,5)
+                            .background(section == tab ? Color.white.opacity(0.16) : .clear,in:RoundedRectangle(cornerRadius:6))
+                    }
+                    Divider().frame(height:20)
+                    Menu {
+                        ForEach(["전체 검색","오늘 할 일","요청 목록","내 계정"],id: \.self) { title in Button(title) { page = title } }
+                        if inbox.admin { Button("설정") { settings = true }; Button("팀 관리") { page = "팀 관리" }; Button("새 대화") { creating = true } }
+                        Divider()
+                        Button("새로고침") { Task { await inbox.refresh(); await inbox.read(inbox.selected) } }
+                        Button("로그아웃") { Task { _ = try? await inbox.request("/api/auth/logout",body:[:]); inbox.clear() } }
+                    } label: { Image(systemName:"ellipsis.circle").font(.title3) }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("업무 메뉴")
+                }.padding(.horizontal,24).frame(height:66).foregroundStyle(.white)
+                    .background(section == "보드" ? Color(red:0.16,green:0.145,blue:0.20) : DeskTheme.forest)
                 Group {
                 if section == "인박스" {
                 HSplitView {
                     VStack(alignment:.leading, spacing:10) {
-                        Text("카카오 인박스").font(.title2.bold())
-                        TextField("채팅방 검색", text:$query).textFieldStyle(.roundedBorder)
+                        Text("대화 목록").font(.system(size:22,weight:.bold))
+                        HStack { Image(systemName:"magnifyingglass").foregroundStyle(.secondary); TextField("대화방 검색",text:$query).textFieldStyle(.plain) }.padding(9).background(.white,in:RoundedRectangle(cornerRadius:8))
                         HStack {
                             Picker("단계", selection: $stage) {
                                 Text("전체 단계").tag(nil as Stage?)
@@ -166,20 +182,24 @@ struct Desk: View {
                             }.labelsHidden()
                             Toggle("안 읽음", isOn: $unreadOnly).toggleStyle(.button)
                         }
-                        List(selection:$inbox.selected) {
+                        ScrollView { LazyVStack(spacing:3) {
                             ForEach(visibleRooms) { r in
-                                HStack {
+                                Button { inbox.selected = r.id } label: {
+                                HStack(spacing:10) {
+                                    Text(r.display_name == "(unknown)" ? "#" : String(r.display_name.prefix(1))).font(.headline)
+                                        .frame(width:36,height:36).background(DeskTheme.tones[Int(r.id.utf8.last ?? 0) % 6].opacity(0.19),in:RoundedRectangle(cornerRadius:12))
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(r.display_name).lineLimit(1)
+                                        Text(r.display_name == "(unknown)" ? "이름 없는 대화" : r.display_name).fontWeight(.semibold).lineLimit(1)
                                         Text("\(Stage(rawValue: r.board?.stage ?? "new")?.title ?? "응대필요") · \(r.member_count)명")
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer()
                                     if r.unread_count > 0 { Text(String(r.unread_count)).font(.caption.bold()).padding(4).background(Color.red, in: Capsule()).foregroundColor(.white) }
-                                }.tag(r.id)
+                                }.padding(8).background(inbox.selected == r.id ? DeskTheme.selected : .clear,in:RoundedRectangle(cornerRadius:9)).contentShape(Rectangle())
+                                }.buttonStyle(.plain)
                             }
-                        }.listStyle(.sidebar)
-                    }.padding(12).frame(minWidth:210,idealWidth:285,maxWidth:420)
+                        } }
+                    }.padding(18).frame(width:285).frame(maxHeight:.infinity,alignment:.topLeading).background(DeskTheme.side)
                     VStack(alignment:.leading,spacing:0) {
                         Text(room?.display_name ?? "대화를 선택해 주세요").font(.title2.bold()).padding()
                         Divider()
@@ -211,7 +231,7 @@ struct Desk: View {
                                                 if entry.is_edited == true { Text("수정됨").font(.caption2) }
                                                 Text(entry.text.isEmpty ? "[첨부]" : entry.text)
                                                     .textSelection(.enabled).padding(9)
-                                                    .background(entry.is_from_me ? Color.yellow.opacity(0.32) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
+                                                    .background(entry.is_from_me ? DeskTheme.outgoing : DeskTheme.incoming, in: RoundedRectangle(cornerRadius: 9))
                                                 if ["photo","image","file","video","audio","multi_photo"].contains(entry.type) || entry.localFilePath != nil {
                                                     Button(entry.localFilePath == nil ? "첨부 다운로드" : "Finder에서 보기") {
                                                         Task { await inbox.reveal(entry, room: room) }
@@ -221,7 +241,7 @@ struct Desk: View {
                                             }.frame(maxWidth: .infinity, alignment: entry.is_from_me ? .trailing : .leading).id(entry.id)
                                         }
                                     }.padding()
-                                }.background(Color(nsColor: .underPageBackgroundColor))
+                                }.background(DeskTheme.paper)
                                 .onChange(of: inbox.entries.isEmpty) { empty in
                                     guard !empty else { return }
                                     if let id = inbox.entries.last?.id { proxy.scrollTo(id, anchor: .bottom) }
@@ -235,12 +255,13 @@ struct Desk: View {
                             }
                         }
                         Spacer(minLength:0)
-                    }.frame(minWidth:355,maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
+                        if let room, inbox.admin, !room.id.hasPrefix("manual_") { DeskComposer(inbox:inbox,room:room).id(room.id) }
+                    }.background(DeskTheme.paper).frame(minWidth:355,maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
                     Group {
                         if let room { RoomWork(inbox:inbox,room:room).id(room.id) }
                         else { Text("대화를 선택하면 업무가 표시돼요").foregroundStyle(.secondary) }
-                    }.frame(minWidth:260, idealWidth:310, maxWidth:420,maxHeight:.infinity)
-                        .background(Color(nsColor:.controlBackgroundColor))
+                    }.frame(width:285).frame(maxHeight:.infinity)
+                        .background(DeskTheme.panel)
                 }
                 } else {
                     GeometryReader { bounds in
@@ -272,6 +293,7 @@ struct Desk: View {
                                 }.padding(8).frame(width:columnWidth,alignment:.topLeading)
                                 .frame(minHeight:max(160,bounds.size.height-32),alignment:.topLeading)
                                 .background(Color.purple.opacity(0.075),in:RoundedRectangle(cornerRadius:10))
+                                .overlay(alignment:.top) { Capsule().fill(DeskTheme.tones[Stage.allCases.firstIndex(of:stage) ?? 0].opacity(0.65)).frame(height:3).padding(.horizontal,4) }
                                 .dropDestination(for:String.self) { ids,_ in
                                     guard inbox.admin, let id = ids.first, let room = inbox.rooms.first(where:{ $0.id == id }) else { return false }
                                     Task { await inbox.move(room,to:stage) }; return true
@@ -281,13 +303,6 @@ struct Desk: View {
                     }
                     }
                 }
-                }.toolbar {
-                    Menu("업무 메뉴") {
-                        ForEach(["전체 검색","오늘 할 일","요청 목록","내 계정"],id: \.self) { title in Button(title) { page = title } }
-                        if inbox.admin { Button("설정") { settings = true }; Button("팀 관리") { page = "팀 관리" }; Button("새 대화") { creating = true } }
-                    }
-                    Button("새로고침") { Task { await inbox.refresh(); await inbox.read(inbox.selected) } }
-                    Button("로그아웃") { Task { _ = try? await inbox.request("/api/auth/logout",body:[:]); inbox.clear() } }
                 }.task(id:inbox.selected) { inbox.entries = []; await inbox.read(inbox.selected) }
                 .task { while !Task.isCancelled { do { try await Task.sleep(nanoseconds:15_000_000_000) } catch { return }; await inbox.refresh(); await inbox.read(inbox.selected) } }
             } else {
@@ -320,7 +335,7 @@ struct Desk: View {
                     await inbox.refresh(); inbox.selected = result["id"]; section = "인박스"; newRoom = ""
                 } catch { inbox.issue = error.localizedDescription } }
             }
-        }.frame(minWidth:600,minHeight:380)
+        }.preferredColorScheme(.light).tint(DeskTheme.forest).frame(minWidth:600,minHeight:380)
     }
 }
 @main struct DeskApp: App {
