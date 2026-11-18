@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 app="$HOME/Applications/Inbox Desk.app"
 contents="$app/Contents"
 mkdir -p "$contents/MacOS" "$contents/Resources"
-xcrun swiftc -O -parse-as-library -target arm64-apple-macos13.0 macos/desk/InboxDesk.swift -o "$contents/MacOS/InboxDesk"
+xcrun swiftc -O -parse-as-library -target arm64-apple-macos13.0 macos/desk/*.swift -o "$contents/MacOS/InboxDesk"
 cp macos/Info.plist "$contents/Info.plist"
 for key in CFBundleName CFBundleDisplayName; do plutil -replace "$key" -string "Inbox Desk" "$contents/Info.plist"; done
 plutil -replace CFBundleExecutable -string InboxDesk "$contents/Info.plist"
