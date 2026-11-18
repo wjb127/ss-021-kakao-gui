@@ -132,6 +132,7 @@ struct Desk: View {
     @State private var name = ""
     @State private var password = ""
     @State private var query = ""
+    @State private var clientsOnly = false
     @State private var stage: Stage?
     @State private var unreadOnly = false
     @State private var settings = false
@@ -174,6 +175,10 @@ struct Desk: View {
                 HSplitView {
                     VStack(alignment:.leading, spacing:10) {
                         Text("대화 목록").font(.system(size:22,weight:.bold))
+                        Picker("대화 분류", selection: $clientsOnly) {
+                            Text("전체").tag(false)
+                            Text("고객").tag(true)
+                        }.pickerStyle(.segmented).labelsHidden()
                         HStack { Image(systemName:"magnifyingglass").foregroundStyle(.secondary); TextField("대화방 검색",text:$query).textFieldStyle(.plain) }.padding(9).background(.white,in:RoundedRectangle(cornerRadius:8))
                         HStack {
                             Picker("단계", selection: $stage) {
@@ -183,7 +188,7 @@ struct Desk: View {
                             Toggle("안 읽음", isOn: $unreadOnly).toggleStyle(.button)
                         }
                         ScrollView { LazyVStack(spacing:3) {
-                            ForEach(visibleRooms) { r in
+                            ForEach(visibleRooms.filter { !clientsOnly || $0.category == "client" }) { r in
                                 Button { inbox.selected = r.id } label: {
                                 HStack(spacing:10) {
                                     Text(r.display_name == "(unknown)" ? "#" : String(r.display_name.prefix(1))).font(.headline)
