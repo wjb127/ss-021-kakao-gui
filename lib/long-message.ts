@@ -10,11 +10,14 @@ interface LongTextMeta { mt?: string; path?: string; s?: number; cs?: string }
 export type LongTextRow = [string, string, string];
 
 // 원본 DB의 메시지 ID는 문자열로 읽어 64비트 정밀도를 보존한다.
-async function readLongTextRows(chatId: string): Promise<LongTextRow[]> {
+async function readLongTextRows(chatId: string, ids: string[]): Promise<LongTextRow[]> {
+  // 짧은 기간 복사에서는 해당 메시지의 메타데이터만 읽는다.
+  const selected = ids.length <= 500 && ids.every((id) => /^\d{1,20}$/.test(id))
+    ? ` AND logId IN (${ids.join(",")})` : "";
   const { stdout } = await execFileAsync(process.env.KAKAOCLI_BIN || "kakaocli", [
     "query",
     // JSON에서 슬래시가 \/로 저장되는 경우도 있으므로 MIME 접두부로 찾는다.
-    `SELECT CAST(logId AS TEXT), message, attachment FROM NTChatMessage WHERE chatId=${chatId} AND attachment LIKE '%longtext%'`,
+    `SELECT CAST(logId AS TEXT), message, attachment FROM NTChatMessage WHERE chatId=${chatId}${selected} AND attachment LIKE '%longtext%'`,
     "--db", process.env.KAKAOCLI_DB || "", "--key", process.env.KAKAOCLI_KEY || "",
   ], { timeout: 10_000, maxBuffer: 50 * 1024 * 1024 });
   return JSON.parse(stdout) as LongTextRow[];
@@ -56,10 +59,14 @@ export async function expandLongMessages(
   if (!/^\d+$/.test(chatId) || messages.length === 0) return messages;
   const db = getDb();
   let rows: LongTextRow[];
-  try { rows = await (options.readRows ?? readLongTextRows)(chatId); }
+  const ids = messages.map((message) => message.id);
+  try { rows = await (options.readRows ?? readLongTextRows)(chatId, ids); }
   catch { throw new Error("긴 메시지 원문을 확인하지 못했어요. 카카오톡 연결을 확인한 뒤 다시 복사해 주세요."); }
   const byId = new Map(rows.map((row) => [row[0], row]));
-  const cached = db.prepare("SELECT source_hash, body FROM long_message_bodies WHERE chat_id=? AND message_id=?");
+  const cacheRows = db.prepare(`SELECT message_id, source_hash, body FROM long_message_bodies
+    WHERE chat_id=? AND message_id IN (SELECT value FROM json_each(?))`)
+    .all(chatId, JSON.stringify(ids)) as { message_id: string; source_hash: string; body: string }[];
+  const cached = new Map(cacheRows.map((row) => [row.message_id, row]));
   const save = db.prepare(`INSERT INTO long_message_bodies (chat_id,message_id,source_hash,body) VALUES (?,?,?,?)
     ON CONFLICT(chat_id,message_id) DO UPDATE SET source_hash=excluded.source_hash,body=excluded.body`);
   const result = [...messages];
@@ -71,7 +78,7 @@ export async function expandLongMessages(
       const i = index++;
       const message = messages[i];
       const row = byId.get(message.id);
-      const saved = cached.get(chatId, message.id) as { source_hash: string; body: string } | undefined;
+      const saved = cached.get(message.id);
       if (!row) {
         // 삭제 등으로 원본 메타가 사라져도 이미 보관한 본문은 유지한다.
         if (saved && message.text && saved.body.startsWith(message.text)) result[i] = { ...message, text: saved.body };
